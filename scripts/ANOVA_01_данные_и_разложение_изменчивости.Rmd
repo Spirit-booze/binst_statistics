@@ -54,9 +54,9 @@ col_within <- "#0072B2"
 ```{r}
 data("chickwt")
 
-chicks <- chickwt %>%
+chicks <- chickwts %>%
   mutate(
-    group = feed(
+    feed = factor(
       feed,
       levels = c("horsebean", "linseed", "soybean", "sunflower", "meatmeal", "casein"),
       labels = c("конские бобы", "лён", "соя", "подсолнечник", "мясная мука", "казеин")
@@ -76,13 +76,13 @@ glimpse(chicks)
 colSums(is.na(chicks))
 ```
 
-Одна строка — один цыплёнок Зависимая переменная `weight` количественная, предиктор `group` — фактор.
+Одна строка — один цыплёнок Зависимая переменная `weight` количественная, предиктор `feed` — фактор.
 
 ## Сколько наблюдений в группах?
 
 ```{r}
-plants %>%
-  count(group)
+chicks %>%
+  count(feed)
 ```
 
 ```{r}
@@ -104,8 +104,8 @@ ggplot(chicks, aes(x = feed, y = weight, colour = feed)) +
     alpha = 0.75
   ) +
   labs(
-    x = "Экспериментальное условие",
-    y = "Масса высушенного растения"
+    x = "Добавки к рациону",
+    y = "Вес цыплёнка после 6 недель диеты"
   ) +
   guides(colour = "none")
 ```
@@ -115,8 +115,8 @@ ggplot(chicks, aes(x = feed, y = weight, colour = feed)) +
 ## Описательные статистики
 
 ```{r}
-group_stats <- plants %>%
-  group_by(group) %>%
+group_stats <- chicks %>%
+  group_by(feed) %>%
   summarise(
     n = n(),
     mean = mean(weight),
@@ -128,7 +128,7 @@ group_stats
 ```
 
 ```{r}
-grand_mean <- mean(plants$weight)
+grand_mean <- mean(chicks$weight)
 grand_mean
 ```
 
@@ -169,7 +169,7 @@ $$
 ## Модель $M_0$: игнорируем группу
 
 ```{r}
-ggplot(plants, aes(x = group, y = weight)) +
+ggplot(chicks, aes(x = feed, y = weight)) +
   geom_point(colour = col_obs, alpha = 0.65, size = 2) +
   geom_hline(
     yintercept = grand_mean,
@@ -188,18 +188,18 @@ ggplot(plants, aes(x = group, y = weight)) +
 ## Модель $M_1$: учитываем группу
 
 ```{r}
-ggplot(plants, aes(x = group, y = weight)) +
+ggplot(chicks, aes(x = feed, y = weight)) +
   geom_point(colour = col_obs, alpha = 0.35, size = 2) +
   geom_errorbar(
     data = group_stats,
-    aes(x = group, ymin = mean, ymax = mean, colour = group),
+    aes(x = feed, ymin = mean, ymax = mean, colour = feed),
     inherit.aes = FALSE,
     width = 0.35,
     linewidth = 1.2
   ) +
   labs(
-    x = "Экспериментальное условие",
-    y = "Масса высушенного растения",
+    x = "Добавка к рациону",
+    y = "Вес цыплёнка после 6 недель диеты",
     title = "Своя прогнозная величина для каждой группы"
   ) +
   guides(colour = "none")
@@ -210,9 +210,9 @@ ggplot(plants, aes(x = group, y = weight)) +
 ## Общая изменчивость: отклонения от $\bar y$
 
 ```{r}
-ggplot(plants, aes(x = group, y = weight)) +
+ggplot(chicks, aes(x = feed, y = weight)) +
   geom_segment(
-    aes(xend = group, yend = grand_mean),
+    aes(xend = feed, yend = grand_mean),
     colour = "grey65",
     linewidth = 0.7
   ) +
@@ -223,8 +223,8 @@ ggplot(plants, aes(x = group, y = weight)) +
     linewidth = 1
   ) +
   labs(
-    x = "Экспериментальное условие",
-    y = "Масса высушенного растения",
+    x = "Добавка к рациону",
+    y = "Вес цыплёнка после 6 недель диеты",
     title = "Ошибки модели M0"
   )
 ```
@@ -240,14 +240,14 @@ SS_T = \sum_{j=1}^{k}\sum_{i=1}^{n_j}(y_{ij}-\bar y)^2
 $$
 
 ```{r}
-SS_total <- sum((plants$weight - grand_mean)^2)
+SS_total <- sum((chicks$weight - grand_mean)^2)
 SS_total
 ```
 
 Тот же результат даёт выборочная дисперсия, умноженная на $n-1$:
 
 ```{r}
-var(plants$weight) * (n - 1)
+var(chicks$weight) * (n - 1)
 ```
 
 Пока это **сумма квадратов**, а не дисперсия.
@@ -255,12 +255,12 @@ var(plants$weight) * (n - 1)
 ## Межгрупповая изменчивость
 
 ```{r}
-ggplot(plants, aes(x = group, y = weight)) +
+ggplot(chicks, aes(x = feed, y = weight)) +
   geom_point(colour = col_obs, alpha = 0.18, size = 2) +
   geom_hline(yintercept = grand_mean, colour = col_total, linewidth = 1) +
   geom_segment(
     data = group_stats,
-    aes(x = group, xend = group, y = grand_mean, yend = mean),
+    aes(x = feed, xend = feed, y = grand_mean, yend = mean),
     inherit.aes = FALSE,
     colour = col_between,
     linewidth = 1.1,
@@ -268,14 +268,14 @@ ggplot(plants, aes(x = group, y = weight)) +
   ) +
   geom_point(
     data = group_stats,
-    aes(x = group, y = mean),
+    aes(x = feed, y = mean),
     inherit.aes = FALSE,
     colour = col_between,
     size = 3
   ) +
   labs(
-    x = "Экспериментальное условие",
-    y = "Масса высушенного растения",
+    x = "Добавка к рациону",
+    y = "Вес цыплёнка после 6 недель диеты",
     title = "Насколько групповые средние удалены от общего среднего"
   )
 ```
@@ -305,29 +305,29 @@ SS_between
 ## Остаточная изменчивость
 
 ```{r}
-plants <- plants %>%
-  group_by(group) %>%
+chicks <- chicks %>%
+  group_by(feed) %>%
   mutate(group_mean = mean(weight)) %>%
   ungroup()
 
-ggplot(plants, aes(x = group, y = weight)) +
+ggplot(chicks, aes(x = feed, y = weight)) +
   geom_segment(
-    aes(xend = group, yend = group_mean),
+    aes(xend = feed, yend = group_mean),
     colour = col_within,
     linewidth = 0.7
   ) +
   geom_point(colour = col_obs, size = 2) +
   geom_errorbar(
     data = group_stats,
-    aes(x = group, ymin = mean, ymax = mean),
+    aes(x = feed, ymin = mean, ymax = mean),
     inherit.aes = FALSE,
     colour = col_within,
     width = 0.35,
     linewidth = 1.1
   ) +
   labs(
-    x = "Экспериментальное условие",
-    y = "Масса высушенного растения",
+    x = "Добавка к рациону",
+    y = "Вес цыплёнка после 6 недель диеты",
     title = "Ошибки модели M1"
   )
 ```
@@ -341,7 +341,7 @@ SS_E = \sum_{j=1}^{k}\sum_{i=1}^{n_j}(y_{ij}-\bar y_j)^2
 $$
 
 ```{r}
-SS_within <- sum((plants$weight - plants$group_mean)^2)
+SS_within <- sum((chicks$weight - chicks$group_mean)^2)
 SS_within
 ```
 
@@ -401,8 +401,8 @@ c(
 ## Проверка через линейную модель
 
 ```{r}
-m0 <- lm(weight ~ 1, data = plants)
-m1 <- lm(weight ~ group, data = plants)
+m0 <- lm(weight ~ 1, data = chicks)
+m1 <- lm(weight ~ feed, data = chicks)
 
 # Общая сумма квадратов — ошибка модели M0
 deviance(m0)
