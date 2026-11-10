@@ -1,0 +1,417 @@
+---
+title: "Однофакторный дисперсионный анализ"
+subtitle: "Блок 1. Данные и разложение изменчивости"
+author: "Иван Валиев"
+date: '11.11.2026'
+output:
+  slidy_presentation:
+    duration: 30
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 8,
+  fig.height = 4.4
+)
+
+library(dplyr)
+library(ggplot2)
+
+theme_set(theme_bw(base_size = 15))
+
+col_obs <- "#4D4D4D"
+col_total <- "#222222"
+col_between <- "#D55E00"
+col_within <- "#0072B2"
+```
+
+## Данные и исследовательский вопрос
+
+Используем встроенный в R датасет `chickwts`.
+
+Цыплята после рождения случайно распределялись в 1 из 6 групп по используемой
+добавке к питанию:
+
+ - horsebean — конские бобы;
+ - linseed — лён;
+ - soybean — соя;
+ - sunflower — подсолнечник;
+ - meatmeal — мясная мука;
+ - casein — казеин.
+
+После 6 недель диеты цыплят взвешивали
+
+**Вопрос:** Как бы вы организовали анализ данных для проверки гипотезы о равенстве
+веса цыплят после 6 недель диеты 
+
+**Вопрос 0:** какова природа переменных в датасете?
+
+## Открываем данные
+
+```{r}
+data("chickwt")
+
+chicks <- chickwt %>%
+  mutate(
+    group = feed(
+      feed,
+      levels = c("horsebean", "linseed", "soybean", "sunflower", "meatmeal", "casein"),
+      labels = c("конские бобы", "лён", "соя", "подсолнечник", "мясная мука", "казеин")
+    )
+  )
+
+head(chicks)
+```
+
+## Структура данных
+
+```{r}
+glimpse(chicks)
+```
+
+```{r}
+colSums(is.na(chicks))
+```
+
+Одна строка — один цыплёнок Зависимая переменная `weight` количественная, предиктор `group` — фактор.
+
+## Сколько наблюдений в группах?
+
+```{r}
+plants %>%
+  count(group)
+```
+
+```{r}
+n <- nrow(chicks)
+k <- nlevels(chicks$feed)
+
+c(n = n, k = k)
+```
+
+Наблюдений в группах неодинаковое количество, но позволим себе на это не обращать внимания
+
+## Первый взгляд на данные
+
+```{r}
+ggplot(chicks, aes(x = feed, y = weight, colour = feed)) +
+  geom_point(
+    position = position_jitter(width = 0.09, height = 0, seed = 42),
+    size = 2.5,
+    alpha = 0.75
+  ) +
+  labs(
+    x = "Экспериментальное условие",
+    y = "Масса высушенного растения"
+  ) +
+  guides(colour = "none")
+```
+
+По одному графику нельзя сделать вывод о значимости различий, но можно увидеть расположение наблюдений и разброс внутри групп.
+
+## Описательные статистики
+
+```{r}
+group_stats <- plants %>%
+  group_by(group) %>%
+  summarise(
+    n = n(),
+    mean = mean(weight),
+    sd = sd(weight),
+    .groups = "drop"
+  )
+
+group_stats
+```
+
+```{r}
+grand_mean <- mean(plants$weight)
+grand_mean
+```
+
+Дальше нам понадобятся три вида величин: наблюдения $y_{ij}$, групповые средние $\bar y_j$ и общее среднее $\bar y$.
+
+## Формулируем гипотезы
+
+Обозначим генеральные средние в трёх условиях через $\mu_1$, $\mu_2$ и $\mu_3$.
+
+$$
+H_0: \mu_1 = \mu_2 = \mu_3
+$$
+
+$$
+H_1: \text{средние равны не во всех группах}
+$$
+
+ANOVA проверяет общую гипотезу, но сама по себе не показывает, какие именно группы различаются.
+
+## Две модели для среднего
+
+Сравним два способа описывать массу растения.
+
+**Модель $M_0$: одно общее среднее**
+
+$$
+\widehat y_{ij} = \bar y
+$$
+
+**Модель $M_1$: своё среднее для каждой группы**
+
+$$
+\widehat y_{ij} = \bar y_j
+$$
+
+Вопрос можно переформулировать: насколько переход от $M_0$ к $M_1$ уменьшает ошибку описания наблюдений?
+
+## Модель $M_0$: игнорируем группу
+
+```{r}
+ggplot(plants, aes(x = group, y = weight)) +
+  geom_point(colour = col_obs, alpha = 0.65, size = 2) +
+  geom_hline(
+    yintercept = grand_mean,
+    colour = col_total,
+    linewidth = 1
+  ) +
+  labs(
+    x = "Экспериментальное условие",
+    y = "Масса высушенного растения",
+    title = "Одна прогнозная величина для всех наблюдений"
+  )
+```
+
+Горизонтальная линия — общее среднее $\bar y$.
+
+## Модель $M_1$: учитываем группу
+
+```{r}
+ggplot(plants, aes(x = group, y = weight)) +
+  geom_point(colour = col_obs, alpha = 0.35, size = 2) +
+  geom_errorbar(
+    data = group_stats,
+    aes(x = group, ymin = mean, ymax = mean, colour = group),
+    inherit.aes = FALSE,
+    width = 0.35,
+    linewidth = 1.2
+  ) +
+  labs(
+    x = "Экспериментальное условие",
+    y = "Масса высушенного растения",
+    title = "Своя прогнозная величина для каждой группы"
+  ) +
+  guides(colour = "none")
+```
+
+Короткие линии — групповые средние $\bar y_j$.
+
+## Общая изменчивость: отклонения от $\bar y$
+
+```{r}
+ggplot(plants, aes(x = group, y = weight)) +
+  geom_segment(
+    aes(xend = group, yend = grand_mean),
+    colour = "grey65",
+    linewidth = 0.7
+  ) +
+  geom_point(colour = col_obs, size = 2) +
+  geom_hline(
+    yintercept = grand_mean,
+    colour = col_total,
+    linewidth = 1
+  ) +
+  labs(
+    x = "Экспериментальное условие",
+    y = "Масса высушенного растения",
+    title = "Ошибки модели M0"
+  )
+```
+
+Каждый отрезок показывает отклонение $y_{ij}-\bar y$.
+
+## Общая сумма квадратов
+
+Возводим отклонения в квадрат и складываем:
+
+$$
+SS_T = \sum_{j=1}^{k}\sum_{i=1}^{n_j}(y_{ij}-\bar y)^2
+$$
+
+```{r}
+SS_total <- sum((plants$weight - grand_mean)^2)
+SS_total
+```
+
+Тот же результат даёт выборочная дисперсия, умноженная на $n-1$:
+
+```{r}
+var(plants$weight) * (n - 1)
+```
+
+Пока это **сумма квадратов**, а не дисперсия.
+
+## Межгрупповая изменчивость
+
+```{r}
+ggplot(plants, aes(x = group, y = weight)) +
+  geom_point(colour = col_obs, alpha = 0.18, size = 2) +
+  geom_hline(yintercept = grand_mean, colour = col_total, linewidth = 1) +
+  geom_segment(
+    data = group_stats,
+    aes(x = group, xend = group, y = grand_mean, yend = mean),
+    inherit.aes = FALSE,
+    colour = col_between,
+    linewidth = 1.1,
+    arrow = grid::arrow(length = grid::unit(0.18, "cm"), ends = "both")
+  ) +
+  geom_point(
+    data = group_stats,
+    aes(x = group, y = mean),
+    inherit.aes = FALSE,
+    colour = col_between,
+    size = 3
+  ) +
+  labs(
+    x = "Экспериментальное условие",
+    y = "Масса высушенного растения",
+    title = "Насколько групповые средние удалены от общего среднего"
+  )
+```
+
+Каждая стрелка показывает $\bar y_j-\bar y$.
+
+## Межгрупповая сумма квадратов
+
+Каждое групповое отклонение относится ко всем $n_j$ наблюдениям группы, поэтому его квадрат имеет вес $n_j$:
+
+$$
+SS_B = \sum_{j=1}^{k}n_j(\bar y_j-\bar y)^2
+$$
+
+```{r}
+SS_between <- group_stats %>%
+  summarise(
+    SS = sum(n * (mean - grand_mean)^2)
+  ) %>%
+  pull(SS)
+
+SS_between
+```
+
+Это уменьшение суммы квадратов ошибок при переходе от $M_0$ к $M_1$.
+
+## Остаточная изменчивость
+
+```{r}
+plants <- plants %>%
+  group_by(group) %>%
+  mutate(group_mean = mean(weight)) %>%
+  ungroup()
+
+ggplot(plants, aes(x = group, y = weight)) +
+  geom_segment(
+    aes(xend = group, yend = group_mean),
+    colour = col_within,
+    linewidth = 0.7
+  ) +
+  geom_point(colour = col_obs, size = 2) +
+  geom_errorbar(
+    data = group_stats,
+    aes(x = group, ymin = mean, ymax = mean),
+    inherit.aes = FALSE,
+    colour = col_within,
+    width = 0.35,
+    linewidth = 1.1
+  ) +
+  labs(
+    x = "Экспериментальное условие",
+    y = "Масса высушенного растения",
+    title = "Ошибки модели M1"
+  )
+```
+
+Каждый отрезок показывает остаток $y_{ij}-\bar y_j$.
+
+## Остаточная сумма квадратов
+
+$$
+SS_E = \sum_{j=1}^{k}\sum_{i=1}^{n_j}(y_{ij}-\bar y_j)^2
+$$
+
+```{r}
+SS_within <- sum((plants$weight - plants$group_mean)^2)
+SS_within
+```
+
+Это изменчивость, которая остаётся после учёта фактора: различия между растениями внутри одного экспериментального условия.
+
+## Складываем компоненты
+
+Для каждого наблюдения:
+
+$$
+y_{ij}-\bar y =
+(\bar y_j-\bar y) + (y_{ij}-\bar y_j)
+$$
+
+Для сумм квадратов выполняется точное равенство:
+
+$$
+SS_T = SS_B + SS_E
+$$
+
+```{r}
+c(
+  total = SS_total,
+  between = SS_between,
+  within = SS_within,
+  between_plus_within = SS_between + SS_within
+)
+
+all.equal(SS_total, SS_between + SS_within)
+```
+
+## Степени свободы тоже складываются
+
+$$
+df_T = n-1, \qquad df_B = k-1, \qquad df_E = n-k
+$$
+
+$$
+df_T = df_B + df_E
+$$
+
+```{r}
+df_total <- n - 1
+df_between <- k - 1
+df_within <- n - k
+
+c(
+  total = df_total,
+  between = df_between,
+  within = df_within,
+  between_plus_within = df_between + df_within
+)
+```
+
+Следующий шаг — перейти от $SS$ к средним квадратам $MS=SS/df$ и затем к отношению $F=MS_B/MS_E$.
+
+## Проверка через линейную модель
+
+```{r}
+m0 <- lm(weight ~ 1, data = plants)
+m1 <- lm(weight ~ group, data = plants)
+
+# Общая сумма квадратов — ошибка модели M0
+deviance(m0)
+
+# Остаточная сумма квадратов — ошибка модели M1
+deviance(m1)
+
+# Межгрупповая и остаточная компоненты в таблице ANOVA
+anova(m1)
+```
+
+Так ручное разложение изменчивости связывается с обычным синтаксисом линейной модели в R.
