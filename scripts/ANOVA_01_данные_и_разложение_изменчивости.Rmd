@@ -1,6 +1,6 @@
 ---
-title: "Однофакторный дисперсионный анализ"
-subtitle: "Блок 1. Данные и разложение изменчивости"
+title: "ANOVA"
+subtitle: "Дисперсионный анализ"
 author: "Иван Валиев"
 date: '11.11.2026'
 output:
@@ -44,10 +44,7 @@ col_within <- "#0072B2"
 
 После 6 недель диеты цыплят взвешивали
 
-**Вопрос:** Как бы вы организовали анализ данных для проверки гипотезы о равенстве
-веса цыплят после 6 недель диеты 
-
-**Вопрос 0:** какова природа переменных в датасете?
+**Вопрос** Как бы вы сформулировали исследовательскую задачу, гипотезу и тестирование о связи между видом рациона и весом цыплят?
 
 ## Открываем данные
 
@@ -65,6 +62,31 @@ chicks <- chickwts %>%
 
 head(chicks)
 ```
+
+## Визуализируем данные
+
+```{r out.extra = 'style="float:left; padding:20px"'}
+
+chicks_general = ggplot(chicks, aes(x = feed, y = weight, colour = feed)) +
+  geom_boxplot(outlier.shape='', colour='cadetblue3')+
+  geom_point(
+    position = position_jitter(width=0.1, seed = 42),
+    size = 1,
+    alpha = 0.75
+  )+
+  labs(
+    x = "Добавка к рациону",
+    y = "Вес цыплёнка после 6 недель диеты"
+  ) +
+  guides(colour = "none")
+chicks_general
+```
+
+* Простой способ - попарные сравнения
+
+* 6 групп, сравнений много, придётся делать поправку
+
+* Можно ли реформулировать и сделать лучше/проще?
 
 ## Структура данных
 
@@ -94,53 +116,277 @@ c(n = n, k = k)
 
 Наблюдений в группах неодинаковое количество, но позволим себе на это не обращать внимания
 
-## Первый взгляд на данные
+## Тестирование через множественные сравнения
 
-```{r}
-ggplot(chicks, aes(x = feed, y = weight, colour = feed)) +
-  geom_point(
-    position = position_jitter(width = 0.09, height = 0, seed = 42),
-    size = 2.5,
-    alpha = 0.75
-  ) +
-  labs(
-    x = "Добавки к рациону",
-    y = "Вес цыплёнка после 6 недель диеты"
-  ) +
-  guides(colour = "none")
+```{r out.extra = 'style="float:left; padding:20px"'}
+chicks_general
 ```
 
-По одному графику нельзя сделать вывод о значимости различий, но можно увидеть расположение наблюдений и разброс внутри групп.
+Как выглядит совокупность гипотез при множественных попарных сравнениях:
 
-## Описательные статистики
+\begin{gather*}
+H_0^1: \mu_{Hor} - \mu_{Lins} = 0 \qquad vs. \qquad H_1^1: \mu_{Hor} - \mu_{Lins} \neq 0 \\
+H_0^2: \mu_{Hor} - \mu_{Soy} = 0 \qquad vs. \qquad H_1^2: \mu_{Hor} - \mu_{Soy} \neq 0 \\
+\ldots \\
+H_0^6: \mu_{Meat} - \mu_{Cas} = 0 \qquad vs. \qquad H_1^6: \mu_{Meat} - \mu_{Cas} \neq 0 
+\end{gather*}
 
-```{r}
-group_stats <- chicks %>%
+## Тестирование не через множественные сравнения
+
+```{r out.extra = 'style="float:left; padding:20px"'}
+chicks_general
+```
+
+Можно сформулировать не как "какие средние отличаются?", а 
+
+"Есть ли связь между видом добавки к рациону и весом?"
+
+Или - "есть ли ассоциация между фактором и количественной переменной"?
+
+Математически получается выражение
+\begin{align*}
+& H_0\!: \mu_{Def} = \ldots = \mu_{Mid} \\
+vs. \\
+& H_1\!: \exists i,j: \mu_i \neq \mu_j
+\end{align*}
+
+## ANOVA
+
+```{r out.extra = 'style="float:left; padding:20px"'}
+chicks_general
+```
+
+ * Оценкой такой ассоциации в статистике занимается ANOVA - ANalysis Of VAriance, дисперсионный анализ
+
+```{r echo=FALSE, purl=FALSE}
+
+# Групповые средние и координаты на оси X
+dat_smr <- chicks %>%
   group_by(feed) %>%
   summarise(
     n = n(),
     mean = mean(weight),
-    sd = sd(weight),
     .groups = "drop"
+  ) %>%
+  mutate(
+    x = as.numeric(feed),
+    xmin = x - 0.25,
+    xmax = x + 0.25
   )
 
-group_stats
+# Исходные наблюдения + соответствующие групповые средние
+set.seed(83)
+
+dat <- chicks %>%
+  left_join(
+    dat_smr %>% select(feed, mean),
+    by = "feed"
+  ) %>%
+  mutate(
+    x = as.numeric(feed) + runif(n(), -0.15, 0.15)
+  )
+
+# Общее среднее
+gmean <- mean(chicks$weight)
+
+# Подписи и пределы осей
+d_lev <- levels(chicks$feed)
+
+lims <- range(chicks$weight) +
+  c(-1, 1) * 0.06 * diff(range(chicks$weight))
+
+# Одно наблюдение для показа полного разложения отклонения
+id <- 9
+one <- dat %>% slice(id)
+
+# Цвета
+col_total <- "grey70"
+col_between <- "#E69F00"
+col_within <- "#009E73"
+col_mean <- "dodgerblue1"
+
+# Базовый график
+pl <- ggplot(dat, aes(x = x, y = weight)) +
+  scale_x_continuous(
+    breaks = seq_along(d_lev),
+    labels = d_lev
+  ) +
+  coord_cartesian(
+    xlim = c(0.55, length(d_lev) + 0.45),
+    ylim = lims
+  ) +
+  labs(
+    x = "Источник белка в рационе",
+    y = "Масса цыплёнка, г"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(
+      angle = 30,
+      vjust = 0.8,
+      hjust = 0.8
+    )
+  )
+
+# общая изменчивость
+
+pl_tot <- pl +
+  geom_segment(
+    aes(xend = x, yend = gmean),
+    colour = col_total,
+    linewidth = 0.65
+  ) +
+  geom_hline(
+    yintercept = gmean,
+    linewidth = 0.8
+  ) +
+  geom_point(size = 1.5) +
+  annotate(
+    "text",
+    x = 0.6,
+    y = gmean,
+    label = "Общее\nсреднее",
+    hjust = 0,
+    vjust = -0.4,
+    size = 4
+  ) +
+  ggtitle("Общая изменчивость")
+
+pl_all <- pl +
+  # Отклонения всех наблюдений от общего среднего
+  geom_segment(
+    aes(xend = x, yend = gmean),
+    colour = col_total,
+    linewidth = 0.4
+  ) +
+  # Общее среднее
+  geom_hline(
+    yintercept = gmean,
+    linewidth = 0.8
+  ) +
+  # Групповые средние
+  geom_segment(
+    data = dat_smr,
+    aes(x = xmin, xend = xmax, y = mean, yend = mean),
+    inherit.aes = FALSE,
+    colour = col_mean,
+    linewidth = 1.2
+  ) +
+  # Выбранное наблюдение: остаточная компонента
+  geom_segment(
+    data = one,
+    aes(x = x, xend = x, y = weight, yend = mean),
+    inherit.aes = FALSE,
+    colour = col_within,
+    linewidth = 1.6
+  ) +
+  # Выбранное наблюдение: межгрупповая компонента
+  geom_segment(
+    data = one,
+    aes(x = x, xend = x, y = mean, yend = gmean),
+    inherit.aes = FALSE,
+    colour = col_between,
+    linewidth = 1.6
+  ) +
+  geom_point(size = 1.2) +
+  geom_point(
+    data = one,
+    aes(x = x, y = weight),
+    inherit.aes = FALSE,
+    size = 3
+  ) +
+  ggtitle("Разложение отклонения одного наблюдения")
+
+pl_x <- pl +
+  geom_hline(
+    yintercept = gmean,
+    linewidth = 0.8
+  ) +
+  geom_segment(
+    data = dat_smr,
+    aes(x = x, xend = x, y = mean, yend = gmean),
+    inherit.aes = FALSE,
+    colour = col_between,
+    linewidth = 1
+  ) +
+  geom_segment(
+    data = dat_smr,
+    aes(x = xmin, xend = xmax, y = mean, yend = mean),
+    inherit.aes = FALSE,
+    colour = col_mean,
+    linewidth = 1.2
+  ) +
+  geom_point(size = 1.2, alpha = 0.7) +
+  ggtitle("Межгрупповая изменчивость")
+
+pl_res <- pl +
+  geom_segment(
+    aes(xend = x, yend = mean),
+    colour = col_within,
+    linewidth = 0.65
+  ) +
+  geom_segment(
+    data = dat_smr,
+    aes(x = xmin, xend = xmax, y = mean, yend = mean),
+    inherit.aes = FALSE,
+    colour = col_mean,
+    linewidth = 1.2
+  ) +
+  geom_point(size = 1.5) +
+  labs(y = NULL) +
+  ggtitle("Внутригрупповая изменчивость")
+
 ```
 
-```{r}
-grand_mean <- mean(chicks$weight)
-grand_mean
+## Сумма квадратов в данных и её разложение
+
+```{r echo=FALSE, out.extra = 'style="float:left; padding:20px"'}
+pl_tot
 ```
 
-Дальше нам понадобятся три вида величин: наблюдения $y_{ij}$, групповые средние $\bar y_j$ и общее среднее $\bar y$.
+ * Вспоминаем дисперсию.
+ * Опускаемся до суммы квадратов отклонений отдельных наблюдений от общего среднего
 
-## Формулируем гипотезы
+$$SS_T := \sum_{i=1}^n(y_i - \bar y_n)^2 $$
 
-Обозначим генеральные средние в трёх условиях через $\mu_1$, $\mu_2$ и $\mu_3$.
+## Сумма квадратов в данных и её разложение
 
-$$
-H_0: \mu_1 = \mu_2 = \mu_3
-$$
+```{r echo=FALSE, out.extra = 'style="float:left; padding:20px"'}
+pl_all
+```
+
+ * Примечательно, что отклонение значения отдельно взятого наблюдения от общего среднего можно представить, как сумму отклонения наблюдения от группового среднего и отклонения группового среднего от общего
+ 
+$$ y_{ij} - \bar y = (\bar y_i - \bar y) + (y_{ij} - \bar y_j)$$
+
+ * Это требует отдельного вывода, которйы мы тут опустим, но квадраты этих отклонений тоже суммируются
+ 
+$$ SS_T = SS_x + SS_e $$
+
+## Факторная сумма квадратов
+
+```{r echo=FALSE, out.extra = 'style="float:left; padding:20px"'}
+pl_x
+```
+
+$$ SS_x = \sum_{j=1}^{k}n_j(\bar y_j-\bar y)^2 $$
+
+ * Что показывает эта сумма квадратов? Что значит, если она большая или маленькая? Большая или маленькая по сравнению с общей суммой квадратов?
+
+## Внутригрупповая сумма квадратов
+
+```{r echo=FALSE, out.extra = 'style="float:left; padding:20px"'}
+pl_res
+```
+
+$$ SS_e = \sum_{i=1}^{n} \sum_{j=1}^{k}(y_{ij} - \bar y_j)^2 $$
+
+ * А что означает внутригрупповая (остаточная) сумма квадратов?
+
+
+
+## вставочный заголовок
 
 $$
 H_1: \text{средние равны не во всех группах}
@@ -169,18 +415,7 @@ $$
 ## Модель $M_0$: игнорируем группу
 
 ```{r}
-ggplot(chicks, aes(x = feed, y = weight)) +
-  geom_point(colour = col_obs, alpha = 0.65, size = 2) +
-  geom_hline(
-    yintercept = grand_mean,
-    colour = col_total,
-    linewidth = 1
-  ) +
-  labs(
-    x = "Экспериментальное условие",
-    y = "Масса высушенного растения",
-    title = "Одна прогнозная величина для всех наблюдений"
-  )
+
 ```
 
 Горизонтальная линия — общее среднее $\bar y$.
@@ -188,21 +423,7 @@ ggplot(chicks, aes(x = feed, y = weight)) +
 ## Модель $M_1$: учитываем группу
 
 ```{r}
-ggplot(chicks, aes(x = feed, y = weight)) +
-  geom_point(colour = col_obs, alpha = 0.35, size = 2) +
-  geom_errorbar(
-    data = group_stats,
-    aes(x = feed, ymin = mean, ymax = mean, colour = feed),
-    inherit.aes = FALSE,
-    width = 0.35,
-    linewidth = 1.2
-  ) +
-  labs(
-    x = "Добавка к рациону",
-    y = "Вес цыплёнка после 6 недель диеты",
-    title = "Своя прогнозная величина для каждой группы"
-  ) +
-  guides(colour = "none")
+
 ```
 
 Короткие линии — групповые средние $\bar y_j$.
@@ -210,23 +431,7 @@ ggplot(chicks, aes(x = feed, y = weight)) +
 ## Общая изменчивость: отклонения от $\bar y$
 
 ```{r}
-ggplot(chicks, aes(x = feed, y = weight)) +
-  geom_segment(
-    aes(xend = feed, yend = grand_mean),
-    colour = "grey65",
-    linewidth = 0.7
-  ) +
-  geom_point(colour = col_obs, size = 2) +
-  geom_hline(
-    yintercept = grand_mean,
-    colour = col_total,
-    linewidth = 1
-  ) +
-  labs(
-    x = "Добавка к рациону",
-    y = "Вес цыплёнка после 6 недель диеты",
-    title = "Ошибки модели M0"
-  )
+
 ```
 
 Каждый отрезок показывает отклонение $y_{ij}-\bar y$.
@@ -240,8 +445,7 @@ SS_T = \sum_{j=1}^{k}\sum_{i=1}^{n_j}(y_{ij}-\bar y)^2
 $$
 
 ```{r}
-SS_total <- sum((chicks$weight - grand_mean)^2)
-SS_total
+
 ```
 
 Тот же результат даёт выборочная дисперсия, умноженная на $n-1$:
@@ -255,29 +459,7 @@ var(chicks$weight) * (n - 1)
 ## Межгрупповая изменчивость
 
 ```{r}
-ggplot(chicks, aes(x = feed, y = weight)) +
-  geom_point(colour = col_obs, alpha = 0.18, size = 2) +
-  geom_hline(yintercept = grand_mean, colour = col_total, linewidth = 1) +
-  geom_segment(
-    data = group_stats,
-    aes(x = feed, xend = feed, y = grand_mean, yend = mean),
-    inherit.aes = FALSE,
-    colour = col_between,
-    linewidth = 1.1,
-    arrow = grid::arrow(length = grid::unit(0.18, "cm"), ends = "both")
-  ) +
-  geom_point(
-    data = group_stats,
-    aes(x = feed, y = mean),
-    inherit.aes = FALSE,
-    colour = col_between,
-    size = 3
-  ) +
-  labs(
-    x = "Добавка к рациону",
-    y = "Вес цыплёнка после 6 недель диеты",
-    title = "Насколько групповые средние удалены от общего среднего"
-  )
+
 ```
 
 Каждая стрелка показывает $\bar y_j-\bar y$.
@@ -291,13 +473,7 @@ SS_B = \sum_{j=1}^{k}n_j(\bar y_j-\bar y)^2
 $$
 
 ```{r}
-SS_between <- group_stats %>%
-  summarise(
-    SS = sum(n * (mean - grand_mean)^2)
-  ) %>%
-  pull(SS)
 
-SS_between
 ```
 
 Это уменьшение суммы квадратов ошибок при переходе от $M_0$ к $M_1$.
@@ -305,31 +481,7 @@ SS_between
 ## Остаточная изменчивость
 
 ```{r}
-chicks <- chicks %>%
-  group_by(feed) %>%
-  mutate(group_mean = mean(weight)) %>%
-  ungroup()
 
-ggplot(chicks, aes(x = feed, y = weight)) +
-  geom_segment(
-    aes(xend = feed, yend = group_mean),
-    colour = col_within,
-    linewidth = 0.7
-  ) +
-  geom_point(colour = col_obs, size = 2) +
-  geom_errorbar(
-    data = group_stats,
-    aes(x = feed, ymin = mean, ymax = mean),
-    inherit.aes = FALSE,
-    colour = col_within,
-    width = 0.35,
-    linewidth = 1.1
-  ) +
-  labs(
-    x = "Добавка к рациону",
-    y = "Вес цыплёнка после 6 недель диеты",
-    title = "Ошибки модели M1"
-  )
 ```
 
 Каждый отрезок показывает остаток $y_{ij}-\bar y_j$.
@@ -363,14 +515,7 @@ SS_T = SS_B + SS_E
 $$
 
 ```{r}
-c(
-  total = SS_total,
-  between = SS_between,
-  within = SS_within,
-  between_plus_within = SS_between + SS_within
-)
 
-all.equal(SS_total, SS_between + SS_within)
 ```
 
 ## Степени свободы тоже складываются
@@ -384,16 +529,7 @@ df_T = df_B + df_E
 $$
 
 ```{r}
-df_total <- n - 1
-df_between <- k - 1
-df_within <- n - k
 
-c(
-  total = df_total,
-  between = df_between,
-  within = df_within,
-  between_plus_within = df_between + df_within
-)
 ```
 
 Следующий шаг — перейти от $SS$ к средним квадратам $MS=SS/df$ и затем к отношению $F=MS_B/MS_E$.
