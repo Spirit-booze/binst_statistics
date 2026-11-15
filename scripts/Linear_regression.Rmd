@@ -1,0 +1,53 @@
+---
+title: "Линейная регрессия"
+subtitle: "1"
+author: "Иван Валиев"
+author: "Ivan Valiev"
+date: "`r Sys.Date()`"
+output:  slidy_presentation
+---
+
+```{r setup, include=FALSE}
+
+install.packages('HistData')
+install.packages('palmerpenguins')
+
+
+data(GaltonFamilies, package = "HistData")
+penguins <- na.omit(palmerpenguins::penguins)
+data(cars)
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 8,
+  fig.height = 4.4
+)
+
+library(dplyr)
+library(ggplot2)
+
+theme_set(theme_bw(base_size = 15))
+
+```
+
+## Линейная регрессия
+
+```{r cars}
+summary(cars)
+```
+
+## Датасет Гальтона
+
+Большой датасет на 205 семей. В каждой семье измерены рост родителя + рост ребёнка. Ну, и учёт того, из какой семьи ребёнок приходит.
+Немного преобразуем дада
+
+```{r echo=FALSE}
+gf <- GaltonFamilies |>
+  group_by(family) |> 
+  slice_sample(n = 1) |>
+  ungroup()
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
