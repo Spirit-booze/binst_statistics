@@ -1,16 +1,15 @@
 ---
 title: "Линейная регрессия"
-subtitle: "1"
+subtitle: "От постановки проблемы до допущений"
 author: "Иван Валиев"
-author: "Ivan Valiev"
 date: "`r Sys.Date()`"
 output:  slidy_presentation
 ---
 
 ```{r setup, include=FALSE}
 
-install.packages('HistData')
-install.packages('palmerpenguins')
+#install.packages('HistData')
+#install.packages('palmerpenguins')
 
 
 data(GaltonFamilies, package = "HistData")
@@ -32,22 +31,1073 @@ theme_set(theme_bw(base_size = 15))
 
 ```
 
-## Линейная регрессия
-
-```{r cars}
-summary(cars)
-```
-
 ## Датасет Гальтона
 
 Большой датасет на 205 семей. В каждой семье измерены рост родителя + рост ребёнка. Ну, и учёт того, из какой семьи ребёнок приходит.
-Немного преобразуем дада
+Немного преобразуем данные для того, чтобы оставить по 1 ребёнку в семье.
+Зададимся вопросом - можно ли смоделировать рост ребёнка с помощью роста отца?
 
-```{r echo=FALSE}
+```{r out.extra = 'style="float:left; padding:20px"'}
+set.seed(42)
 gf <- GaltonFamilies |>
   group_by(family) |> 
-  slice_sample(n = 1) |>
+  slice_sample(n=1) |>
   ungroup()
+
+ggplot(data=gf, aes(y=childHeight, x=midparentHeight))+
+  geom_point()+
+  labs(y='Рост ребёнка, дюймы', 
+       x='Средний рост родителей, дюймы',
+       title='Зависимость роста ребёнка от роста родителей')
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Регрессия в генеральной совокупности
+
+Соотношение роста детей и родителей можно смоделировать:
+
+\[
+E(Y\mid X=x)=\beta_0+\beta_1x
+\]
+
+```{r galton-population-densities, echo=FALSE, fig.width=8, fig.height=4.8}
+# Параметры СТИЛИЗОВАННОЙ генеральной совокупности
+beta0 = 15
+beta1 = 0.8
+sigma = 2.5
+
+# Отдельные уровни роста отца
+parent_levels = seq(62, 74, by = 2)
+
+# Ширина графика плотности на шкале X
+density_width = 0.9
+
+# Условные распределения Y при каждом выбранном X = x
+population_densities = do.call(
+  rbind,
+  lapply(parent_levels, function(x0) {
+
+    conditional_mean = beta0 + beta1 * x0
+
+    y_values = seq(
+      conditional_mean - 3.5 * sigma,
+      conditional_mean + 3.5 * sigma,
+      length.out = 200
+    )
+
+    density_values = dnorm(
+      y_values,
+      mean = conditional_mean,
+      sd = sigma
+    )
+
+    data.frame(
+      parents = x0,
+      x = x0 + density_width * density_values / max(density_values),
+      y = y_values
+    )
+  })
+)
+
+# Истинные условные средние при выбранных значениях X
+population_means = data.frame(
+  parents = parent_levels,
+  mean_child = beta0 + beta1 * parent_levels
+)
+
+# Непрерывная линия условных средних
+population_line = data.frame(
+  parents = seq(
+    min(parent_levels) - 2,
+    max(parent_levels) + 2,
+    length.out = 100
+  )
+)
+
+population_line$mean_child =
+  beta0 + beta1 * population_line$parents
+
+ggplot() +
+  geom_polygon(
+    data = population_densities,
+    aes(x = x, y = y, group = parents),
+    fill = "#CFE8EF",
+    colour = "black",
+    alpha = 0.75,
+    linewidth = 0.25
+  ) +
+  geom_line(
+    data = population_line,
+    aes(x = parents, y = mean_child),
+    colour = "#D62728",
+    linewidth = 1.1
+  ) +
+  geom_point(
+    data = population_means,
+    aes(x = parents, y = mean_child),
+    colour = "#D62728",
+    size = 2.5
+  ) +
+  scale_x_continuous(breaks = parent_levels) +
+  coord_cartesian(
+    xlim = range(population_line$parents),
+    ylim = range(population_densities$y) + c(-1, 1)
+  ) +
+  labs(
+    title = "Стилизованная генеральная совокупность",
+    x = "Средний рост родителей, дюймы",
+    y = "Рост ребёнка, дюймы"
+  )
+```
+
+## Почему `E(Y|X)`
+
+- Для каждого уровня независимого фактора существует большое количество отдельных наблюдений, и разные уровни зависимой переменной
+- Зависимая переменная является случайной величиной, поэтому мы оцениваем не точное значение, а мат ожидание
+- Тем не менее, идея регрессии в том, что для каждого уровня независимой переменной распределение ожидаемых значений зависимой одинаково. И смещение уровня независимой переменной вверх или вниз на Х пунктов означает коллинеарное смещение зависимой на $Х * \beta_1$ единиц 
+
+## Геометрическая интерпретация линейной регрессии: \(\beta_1\)
+
+- $\beta_1$ по сути представляет то, на сколько в среднем ожидается, чтобы смещался уровень зависимоей переменной при соответствующем изменении независимой переменной x
+
+## Коэффициент регрессии: \(\beta_1\)
+
+\[
+E(Y\mid X=x+1)-E(Y\mid X=x)=\beta_1
+\]
+
+При увеличении среднего роста родителей на 1 дюйм ожидаемый рост ребёнка изменяется на \(\beta_1\) дюйма.
+
+```{r galton-interpret-slope, echo=FALSE, fig.width=8, fig.height=4.8}
+# Несколько пар значений: x и x + 1
+x_starts = c(64, 68, 72)
+
+slope_segments = data.frame(
+  x = x_starts,
+  xend = x_starts + 1
+)
+
+slope_segments$y = beta0 + beta1 * slope_segments$x
+slope_segments$yend = beta0 + beta1 * slope_segments$xend
+
+# Все шесть точек: начало и конец каждой пары
+slope_points = data.frame(
+  x = c(rbind(x_starts, x_starts + 1)),
+  pair = rep(seq_along(x_starts), each = 2)
+)
+
+slope_points$y = beta0 + beta1 * slope_points$x
+
+# Линия истинных условных средних
+slope_line = data.frame(
+  parents = seq(60, 76, length.out = 200)
+)
+
+slope_line$mean_child = beta0 + beta1 * slope_line$parents
+
+ggplot() +
+  # Пунктир от точек к осям
+  geom_segment(
+    data = slope_points,
+    aes(x = x, xend = x, y = 60, yend = y),
+    colour = "grey45",
+    linetype = 2
+  ) +
+  geom_segment(
+    data = slope_points,
+    aes(x = 60, xend = x, y = y, yend = y),
+    colour = "grey45",
+    linetype = 2
+  ) +
+
+  # Линия регрессии генеральной совокупности
+  geom_line(
+    data = slope_line,
+    aes(x = parents, y = mean_child),
+    colour = "#D62728",
+    linewidth = 1.2
+  ) +
+  geom_point(
+    data = slope_points,
+    aes(x = x, y = y),
+    colour = "#D62728",
+    size = 3
+  ) +
+
+  # Изменение X на единицу
+  geom_text(
+    data = slope_segments,
+    aes(x = x + 0.5, y = 60.5),
+    label = "+1",
+    size = 5,
+    fontface = "bold"
+  ) +
+
+  # Соответствующее изменение ожидаемого Y
+  geom_text(
+    data = slope_segments,
+    aes(x = 60.5, y = (y + yend) / 2),
+    label = "+β₁",
+    colour = "#D62728",
+    size = 5,
+    fontface = "bold"
+  ) +
+  coord_cartesian(
+    xlim = c(60, 76),
+    ylim = c(60, 78),
+    expand = FALSE
+  ) +
+  labs(
+    title = "Одинаковое ΔX даёт одинаковое изменение условного среднего",
+    x = "Средний рост родителей, дюймы",
+    y = "Ожидаемый рост ребёнка, дюймы"
+  )
+```
+
+## Геометрическая интерпретация линейной регрессии: \(\beta_0\)
+
+- $beta_0$ показывает, чем будет равняться ожидаемое значение зависимой переменной для случаев, когда независимая переменная равна нулю
+
+## Свободный член: \(\beta_0\)
+
+\[
+E(Y\mid X=0)=\beta_0+\beta_1\cdot0=\beta_0
+\]
+
+Геометрически \(\beta_0\) - ордината пересечения линии с осью \(Y\).  
+
+```{r galton-interpret-intercept, echo=FALSE, fig.width=8, fig.height=4.8}
+intercept_line <- data.frame(
+  parents = seq(0, 76, length.out = 200)
+)
+
+intercept_line$mean_child <-
+  beta0 + beta1 * intercept_line$parents
+
+intercept_point <- data.frame(
+  parents = 0,
+  mean_child = beta0
+)
+
+ggplot() +
+  geom_line(
+    data = intercept_line,
+    aes(x = parents, y = mean_child),
+    colour = "#D62728",
+    linewidth = 1.2
+  ) +
+  geom_point(
+    data = intercept_point,
+    aes(x = parents, y = mean_child),
+    colour = "#D62728",
+    size = 4
+  ) +
+  geom_segment(
+    aes(x = 0, xend = 0, y = 0, yend = beta0),
+    colour = "#D62728",
+    linewidth = 1,
+    linetype = 2
+  ) +
+  annotate(
+    "text",
+    x = 3,
+    y = beta0 + 2.5,
+    label = sprintf("β₀ = %.1f дюйма", beta0),
+    colour = "#D62728",
+    size = 5,
+    hjust = 0
+  ) +
+  annotate(
+    "label",
+    x = 34,
+    y = 24,
+    label = "Линия определена и здесь,\nно нулевой рост родителей не существует",
+    size = 4.5
+  ) +
+  coord_cartesian(
+    xlim = c(0, 76),
+    ylim = c(0, 80),
+    expand = FALSE
+  ) +
+  labs(
+    title = "Интерсепт — значение линии при X = 0",
+    x = "Средний рост родителей, дюймы",
+    y = "Ожидаемый рост ребёнка, дюймы"
+  )
+```
+
+NB! В большом количестве случаев $\beta_0$ может быть бессмысленным с точки зрения реальной практики (мы не ожидаем встречи с наблюдениями с $X = 0$)
+
+## Если предиктор категориальный: два условных распределения
+
+Пусть \(X\) — пол ребёнка:
+
+\[
+x_i=
+\begin{cases}
+0, & \text{девочка},\\
+1, & \text{мальчик}.
+\end{cases}
+\]
+
+Тогда модель \(\widehat y_i=\widehat\beta_0+\widehat\beta_1x_i\) просто задаёт два средних:
+
+\[
+\widehat\beta_0=\overline y_{\text{девочки}},
+\qquad
+\widehat\beta_1=
+\overline y_{\text{мальчики}}-\overline y_{\text{девочки}} .
+\]
+
+```{r galton-binary-predictor, echo=FALSE, fig.width=8, fig.height=4.8}
+gf_gender <- gf |>
+  filter(!is.na(gender)) |>
+  mutate(
+    gender = factor(
+      gender,
+      levels = c("female", "male")
+    )
+  )
+
+gender_levels <- levels(gf_gender$gender)
+gender_positions <- c(0, 1)
+
+# Эмпирические плотности роста внутри каждой категории
+gender_densities <- do.call(
+  rbind,
+  lapply(seq_along(gender_levels), function(j) {
+
+    level_j <- gender_levels[j]
+    heights_j <- gf_gender$childHeight[
+      gf_gender$gender == level_j
+    ]
+
+    density_j <- density(heights_j)
+
+    data.frame(
+      gender = level_j,
+      x = gender_positions[j] +
+        0.35 * density_j$y / max(density_j$y),
+      y = density_j$x
+    )
+  })
+)
+
+# Выборочные средние в двух категориях
+gender_means <- gf_gender |>
+  group_by(gender) |>
+  summarise(
+    mean_child = mean(childHeight),
+    .groups = "drop"
+  ) |>
+  arrange(gender) |>
+  mutate(x = gender_positions)
+
+ggplot() +
+  geom_polygon(
+    data = gender_densities,
+    aes(x = x, y = y, group = gender),
+    fill = "#CFE8EF",
+    colour = "black",
+    alpha = 0.75,
+    linewidth = 0.35
+  ) +
+
+  # Линия соединяет только два средних.
+  # Промежуточные значения категориальной оси не интерпретируются.
+  geom_line(
+    data = gender_means,
+    aes(x = x, y = mean_child),
+    colour = "#D62728",
+    linewidth = 1.2,
+    linetype = 2
+  ) +
+  geom_point(
+    data = gender_means,
+    aes(x = x, y = mean_child),
+    colour = "#D62728",
+    size = 4
+  ) +
+  geom_text(
+    data = gender_means,
+    aes(
+      x = x + 0.08,
+      y = mean_child,
+      label = sprintf("среднее = %.1f", mean_child)
+    ),
+    colour = "#D62728",
+    hjust = 0,
+    vjust = -0.8,
+    size = 4.5
+  ) +
+  scale_x_continuous(
+    breaks = gender_positions,
+    labels = c("Девочки\n(X = 0)", "Мальчики\n(X = 1)")
+  ) +
+  coord_cartesian(
+    xlim = c(-0.25, 1.65),
+    ylim = range(gf_gender$childHeight) + c(-1, 2)
+  ) +
+  labs(
+    title = "Дихотомический предиктор: две плотности и два средних",
+    subtitle = "Эмпирические распределения по выборке; наклон линии — разница выборочных средних",
+    x = NULL,
+    y = "Рост ребёнка, дюймы"
+  )
+```
+
+## Линейная регрессия языком матричной алгебры
+
+Условное математическое ожидание и линейный предиктор
+\[
+\begin{aligned}
+E(Y \mid X)
+&= \beta_0 + \beta_1 X_1 + \cdots + \beta_p X_p \\
+&= \beta_0 \cdot 1 + \beta_1 X_1 + \cdots + \beta_p X_p \\
+&= X\beta .
+\end{aligned}
+\]
+
+Матрица предикторов и вектор коэффициентов
+\[
+X =
+\begin{pmatrix}
+1      & x_{11} & \cdots & x_{1p} \\
+1      & x_{21} & \cdots & x_{2p} \\
+\vdots & \vdots & \ddots & \vdots \\
+1      & x_{n1} & \cdots & x_{np}
+\end{pmatrix},
+\qquad
+\beta =
+\begin{pmatrix}
+\beta_0 \\
+\beta_1 \\
+\vdots \\
+\beta_p
+\end{pmatrix}.
+\]
+
+Конкретные значения зависимой переменной в скалярной записи
+\[
+Y = \beta_0 + \beta_1 X_1 + \cdots + \beta_p X_p + \varepsilon .
+\]
+
+Запись для отдельного наблюдения
+\[
+y_i =
+\beta_0
++ \beta_1 x_{i1}
++ \cdots
++ \beta_p x_{ip}
++ \varepsilon_i,
+\qquad i = 1, \ldots, n .
+\]
+
+Фиксированная и случайная части модели
+\[
+y_i =
+\underbrace{
+  \beta_0 + \beta_1 x_{i1} + \cdots + \beta_p x_{ip}
+}_{\text{фиксированная часть}}
++
+\underbrace{
+  \varepsilon_i
+}_{\text{случайная ошибка}} .
+\]
+
+Полная матричная запись модели
+\[
+\underbrace{
+\begin{pmatrix}
+y_1 \\
+y_2 \\
+\vdots \\
+y_n
+\end{pmatrix}
+}_{Y}
+=
+\underbrace{
+\begin{pmatrix}
+1      & x_{11} & \cdots & x_{1p} \\
+1      & x_{21} & \cdots & x_{2p} \\
+\vdots & \vdots & \ddots & \vdots \\
+1      & x_{n1} & \cdots & x_{np}
+\end{pmatrix}
+}_{X}
+\underbrace{
+\begin{pmatrix}
+\beta_0 \\
+\beta_1 \\
+\vdots \\
+\beta_p
+\end{pmatrix}
+}_{\beta}
++
+\underbrace{
+\begin{pmatrix}
+\varepsilon_1 \\
+\varepsilon_2 \\
+\vdots \\
+\varepsilon_n
+\end{pmatrix}
+}_{\varepsilon}.
+\]
+
+Краткая матричная форма
+\[
+Y = X\beta + \varepsilon,
+\qquad
+E(Y \mid X) = X\beta .
+\]
+
+## Расчёт линейной регрессии
+
+- Допустим, мы обсудили, что из себя представляет регрессия в генеральной совокупности
+- А как сделать оценку коэффициентов этой регрессии, имея на руках выборку?
+
+## Какую прямую выбрать?
+
+Любая пара коэффициентов \(b_0\) и \(b_1\) задаёт свою прямую:
+
+\[
+\widehat{y}=b_0+b_1x
+\]
+
+Как мы поймём, какая прицельно пара коэффициентов описывает связь между переменными в генеральной совокупности наилучшим образом?
+
+```{r galton-many-lines, echo=FALSE, fig.width=8, fig.height=4.8}
+# Оценённая по выборке линия МНК
+fit_galton = lm(childHeight ~ midparentHeight, data = gf)
+
+ols_intercept = unname(coef(fit_galton)[1])
+ols_slope = unname(coef(fit_galton)[2])
+
+# Центр облака наблюдений
+x_centre = mean(gf$midparentHeight)
+y_centre = mean(gf$childHeight)
+
+# Произвольные альтернативные прямые.
+# Чтобы линии не уходили слишком далеко от данных,
+# задаём их наклон и высоту около центра облака.
+set.seed(123)
+
+candidate_lines = data.frame(
+  slope = runif(30, min = -0.2, max = 1.3),
+  height_at_centre = rnorm(30, mean = y_centre, sd = 4)
+)
+
+candidate_lines$intercept =
+  candidate_lines$height_at_centre -
+  candidate_lines$slope * x_centre
+
+# Можно посчитать RSS для каждой произвольной прямой
+candidate_lines$rss = apply(
+  candidate_lines,
+  1,
+  function(line) {
+    fitted_values =
+      line[["intercept"]] +
+      line[["slope"]] * gf$midparentHeight
+
+    sum((gf$childHeight - fitted_values)^2)
+  }
+)
+
+# RSS для линии МНК
+ols_rss = sum(resid(fit_galton)^2)
+
+ggplot(gf, aes(x = midparentHeight, y = childHeight)) +
+  geom_point(
+    size = 1.8,
+    alpha = 0.45,
+    colour = "grey25"
+  ) +
+  geom_abline(
+    data = candidate_lines,
+    aes(intercept = intercept, slope = slope),
+    inherit.aes = FALSE,
+    colour = "grey55",
+    alpha = 0.45,
+    linewidth = 0.6
+  ) +
+  geom_abline(
+    intercept = ols_intercept,
+    slope = ols_slope,
+    colour = "#D62728",
+    linewidth = 1.5
+  ) +
+  coord_cartesian(
+    ylim = range(gf$childHeight) + c(-2, 2)
+  ) +
+  labs(
+    title = "Как отличить лучшую прямую от нелучшей?",
+
+    x = "Средний рост родителей, дюймы",
+    y = "Рост ребёнка, дюймы"
+  )
+```
+
+## Оценка модели методом наименьших квадратов (МНК)
+
+## МНК: минимизируем сумму квадратов остатков
+
+Для наблюдения \(i\):
+
+- \(x_i\) — фактическое значение среднего роста родителей;
+- \(y_i\) — фактический рост ребёнка;
+- \(\widehat y_i=\widehat\beta_0+\widehat\beta_1x_i\) — предсказанный рост;
+- \(e_i=y_i-\widehat y_i\) — остаток.
+
+Что тут напоминает \(SS_e\)?
+
+\[
+SS_e=\sum_{i=1}^{n}e_i^2
+=\sum_{i=1}^{n}(y_i-\widehat y_i)^2
+\]
+
+Мы подбираем такое уравнение регрессии, при котором сумма квадратов отклонений предсказанных значений от фактических будет минимальной:
+
+\[
+(\widehat\beta_0,\widehat\beta_1)
+=
+\underset{b_0,b_1}{\operatorname{arg\,min}}
+\sum_{i=1}^{n}
+\left[y_i-(b_0+b_1x_i)\right]^2 .
+\]
+
+```{r galton-ols-residuals, echo=FALSE, fig.width=8, fig.height=4.8}
+fit_galton <- lm(childHeight ~ midparentHeight, data = gf)
+
+gf_plot <- gf
+gf_plot$fitted <- fitted(fit_galton)
+gf_plot$residual <- residuals(fit_galton)
+
+# Несколько наблюдений, для которых покажем остатки
+residual_examples <- gf_plot |>
+  slice_max(order_by = abs(residual), n = 10)
+
+# Одно наблюдение для подробных подписей
+highlight <- gf_plot |>
+  filter(between(midparentHeight, 67, 70)) |>
+  slice_max(order_by = abs(residual), n = 1)
+
+x_min <- min(gf_plot$midparentHeight)
+y_min <- min(gf_plot$childHeight)
+
+ggplot(gf_plot, aes(x = midparentHeight, y = childHeight)) +
+  # Фактические наблюдения
+  geom_point(
+    colour = "grey35",
+    alpha = 0.55,
+    size = 2
+  ) +
+
+  # Остатки для выбранных наблюдений
+  geom_segment(
+    data = residual_examples,
+    aes(
+      x = midparentHeight,
+      xend = midparentHeight,
+      y = childHeight,
+      yend = fitted
+    ),
+    colour = "grey45",
+    linewidth = 0.7
+  ) +
+
+  # Оптимальная по критерию МНК прямая
+  geom_abline(
+    intercept = unname(coef(fit_galton)[1]),
+    slope = unname(coef(fit_galton)[2]),
+    colour = "#276FBF",
+    linewidth = 1.3
+  ) +
+
+  # Предсказанные значения на линии регрессии
+  geom_point(
+    data = residual_examples,
+    aes(x = midparentHeight, y = fitted),
+    shape = 21,
+    fill = "#276FBF",
+    colour = "white",
+    size = 2.8,
+    stroke = 0.5
+  ) +
+
+  # Остаток выделенного наблюдения
+  geom_segment(
+    data = highlight,
+    aes(
+      x = midparentHeight,
+      xend = midparentHeight,
+      y = childHeight,
+      yend = fitted
+    ),
+    colour = "#D62728",
+    linewidth = 1.4
+  ) +
+
+  # Пунктирные направляющие к осям
+  geom_segment(
+    data = highlight,
+    aes(
+      x = midparentHeight,
+      xend = midparentHeight,
+      y = y_min,
+      yend = childHeight
+    ),
+    linetype = 3,
+    colour = "grey40"
+  ) +
+  geom_segment(
+    data = highlight,
+    aes(
+      x = x_min,
+      xend = midparentHeight,
+      y = childHeight,
+      yend = childHeight
+    ),
+    linetype = 3,
+    colour = "grey40"
+  ) +
+  geom_segment(
+    data = highlight,
+    aes(
+      x = x_min,
+      xend = midparentHeight,
+      y = fitted,
+      yend = fitted
+    ),
+    linetype = 3,
+    colour = "#276FBF"
+  ) +
+
+  # Фактическое и предсказанное значения выделенного наблюдения
+  geom_point(
+    data = highlight,
+    size = 4,
+    colour = "black"
+  ) +
+  geom_point(
+    data = highlight,
+    aes(x = midparentHeight, y = fitted),
+    shape = 21,
+    fill = "#276FBF",
+    colour = "white",
+    size = 4,
+    stroke = 0.7
+  ) +
+
+  # Подписи x_i, y_i, fitted и остатка
+  geom_text(
+    data = highlight,
+    aes(x = midparentHeight, y = y_min + 0.5),
+    label = "x[i]",
+    parse = TRUE,
+    size = 5
+  ) +
+  geom_text(
+    data = highlight,
+    aes(x = x_min + 0.2, y = childHeight),
+    label = "y[i]",
+    parse = TRUE,
+    size = 5,
+    hjust = 0,
+    vjust = -0.7
+  ) +
+  geom_text(
+    data = highlight,
+    aes(x = x_min + 0.2, y = fitted),
+    label = "hat(y)[i]",
+    parse = TRUE,
+    size = 5,
+    colour = "#276FBF",
+    hjust = 0,
+    vjust = 1.4
+  ) +
+  geom_text(
+    data = highlight,
+    aes(
+      x = midparentHeight + 0.15,
+      y = (childHeight + fitted) / 2
+    ),
+    label = "e[i]",
+    parse = TRUE,
+    size = 5,
+    colour = "#D62728",
+    hjust = 0
+  ) +
+  coord_cartesian(
+    xlim = range(gf_plot$midparentHeight) + c(-0.5, 0.8),
+    ylim = range(gf_plot$childHeight) + c(-1, 1)
+  ) +
+  labs(
+    title = "Остаток — вертикальное расстояние от наблюдения до прямой",
+    x = "Средний рост родителей, дюймы",
+    y = "Рост ребёнка, дюймы"
+  )
+```
+
+## Допущения модели
+
+- При выполнении определённых условий (согласно теореме Гаусса-Маркова и некоторым другим) метод наименьших квадратов (МНК) даёт даёт наилучшие линейные несмещённые оценки параметров модели
+- Что значит "наилучшие"?
+
+## Наилучшие оценки модели при линейной регрессии
+
+- Вообще вычислимы
+- Несмещённые
+- Имеют наименьшую дисрерсию (точные)
+- На этих коэффициентах можно прогонять стат тесты
+- В данных нет какой-то структуры или "особенных" наблюдений, которые искажали бы или стягивали на себя состояние модели
+
+## От ошибок модели к остаткам: диагностика регрессии
+
+Модель в генеральной совокупности:
+
+\[
+Y_i=\beta_0+\beta_1x_i+\varepsilon_i .
+\]
+
+По выборке получаем предсказания и остатки:
+
+\[
+\widehat y_i=\widehat\beta_0+\widehat\beta_1x_i,
+\qquad
+e_i=y_i-\widehat y_i .
+\]
+
+- Здесь \(\varepsilon_i\) — ненаблюдаемая ошибка модели, а \(e_i\) — вычисленный остаток, её оценка. 
+- Остатки можно преобразовывать различными способами, но анализ их распределения и возможных паттернов — ключ к диагностике регрессии.
+
+```{r galton-residual-diagnostics, echo=FALSE, fig.width=11, fig.height=4.8}
+library(patchwork)
+
+fit_galton <- lm(childHeight ~ midparentHeight, data = gf)
+
+gf_resid <- gf
+gf_resid$fitted <- fitted(fit_galton)
+gf_resid$residual <- residuals(fit_galton)
+
+# Наблюдения, для которых покажем остатки на обоих графиках
+residual_examples <- gf_resid |>
+  slice_max(order_by = abs(residual), n = 8)
+
+# Левый график: наблюдения, прямая и вертикальные остатки
+p_left <- ggplot(
+  gf_resid,
+  aes(x = midparentHeight, y = childHeight)
+) +
+  geom_point(
+    colour = "grey40",
+    alpha = 0.5,
+    size = 1.8
+  ) +
+  geom_segment(
+    data = residual_examples,
+    aes(
+      x = midparentHeight,
+      xend = midparentHeight,
+      y = childHeight,
+      yend = fitted
+    ),
+    colour = "#D62728",
+    linewidth = 0.9
+  ) +
+  geom_abline(
+    intercept = unname(coef(fit_galton)[1]),
+    slope = unname(coef(fit_galton)[2]),
+    colour = "#276FBF",
+    linewidth = 1.2
+  ) +
+  geom_point(
+    data = residual_examples,
+    aes(x = midparentHeight, y = fitted),
+    shape = 21,
+    fill = "#276FBF",
+    colour = "white",
+    size = 2.8
+  ) +
+  labs(
+    title = "Остатки на диаграмме рассеяния",
+    subtitle = "Красные отрезки: e[i] == y[i] - hat(y)[i]",
+    x = "Средний рост родителей, дюймы",
+    y = "Рост ребёнка, дюймы"
+  ) +
+  theme(plot.subtitle = element_text(size = 11))
+
+# Правый график: остатки против предсказанных значений
+p_right <- ggplot(
+  gf_resid,
+  aes(x = fitted, y = residual)
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = 2,
+    colour = "grey45"
+  ) +
+  geom_segment(
+    data = residual_examples,
+    aes(
+      x = fitted,
+      xend = fitted,
+      y = 0,
+      yend = residual
+    ),
+    colour = "#D62728",
+    linewidth = 0.8,
+    alpha = 0.8
+  ) +
+  geom_point(
+    colour = "grey40",
+    alpha = 0.5,
+    size = 1.8
+  ) +
+  geom_point(
+    data = residual_examples,
+    colour = "#D62728",
+    size = 2.8
+  ) +
+  labs(
+    title = "Остатки против предсказанных значений",
+    subtitle = "Те же красные наблюдения, что на графике слева",
+    x = expression("Предсказанное значение, " * hat(y)[i]),
+    y = expression("Остаток, " * e[i])
+  ) +
+  theme(plot.subtitle = element_text(size = 11))
+
+p_left | p_right
+```
+
+## Требования к линейной модели
+
+- Линейность связи (корректная спецификация модели)
+- Гомоскедастичность
+- Нормальное распределение ошибок
+- Отсутствие влиятельных наблюдений
+- Отсутствие структуры в данных
+- Отсутствие мултиколлинеарности
+
+## Диагностика линейной регрессии: линейность связи
+
+- Частный случай "корректной спецификации модели"
+- Если связь между переменными линейна, то случайный член в модели является случайной величиной, подчинающейся нормальному распределению, со средним 0 и дисперсией, равномерно распределённой вдоль оси предсказанных значений
+- Проще всего диагностировать... по графику остатков.
+- Нарушения (паттерны в виде угла, парабол и так далее) - признак либо нелинейной связи, либо других проблем.
+- Если игнорировать эту проблему, то вы будете оценивать линейную связь там, где она например, квадратичная.
+
+```{r, echo=FALSE, fig.width=11, fig.height=4.6}
+set.seed(2026)
+
+n <- 180
+
+sim_quad <- data.frame(
+  x = runif(n, min = -3, max = 3)
+)
+
+sim_quad$y <- 4 +
+  2 * sim_quad$x^2 +
+  rnorm(n, mean = 0, sd = 1.2)
+
+# Ошибочно описываем квадратичную связь прямой
+fit_sim_linear <- lm(
+  y ~ x,
+  data = sim_quad
+)
+
+# Учитываем квадратичную зависимость
+fit_sim_quad <- lm(
+  y ~ I(x^2),
+  data = sim_quad
+)
+
+resid_sim_linear <- data.frame(
+  fitted = fitted(fit_sim_linear),
+  residual = residuals(fit_sim_linear)
+)
+
+resid_sim_quad <- data.frame(
+  fitted = fitted(fit_sim_quad),
+  residual = residuals(fit_sim_quad)
+)
+
+# Общая шкала остатков
+resid_sim_max <- max(abs(c(
+  resid_sim_linear$residual,
+  resid_sim_quad$residual
+)))
+
+resid_sim_limits <- c(-1.1, 1.1) * resid_sim_max
+
+p_sim_linear <- ggplot(
+  resid_sim_linear,
+  aes(x = fitted, y = residual)
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = 2,
+    colour = "grey45"
+  ) +
+  geom_point(
+    alpha = 0.65,
+    colour = "grey30"
+  ) +
+  geom_smooth(
+    method = "loess",
+    formula = y ~ x,
+    se = FALSE,
+    span = 0.8,
+    linewidth = 1.2,
+    colour = "#D55E00"
+  ) +
+  coord_cartesian(ylim = resid_sim_limits) +
+  labs(
+    title = "Квадратичная зависимость не учтена",
+    subtitle = "Модель: Y ~ X",
+    x = expression(hat(y)),
+    y = "Остаток"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+
+p_sim_quad <- ggplot(
+  resid_sim_quad,
+  aes(x = fitted, y = residual)
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = 2,
+    colour = "grey45"
+  ) +
+  geom_point(
+    alpha = 0.65,
+    colour = "grey30"
+  ) +
+  geom_smooth(
+    method = "loess",
+    formula = y ~ x,
+    se = FALSE,
+    span = 0.8,
+    linewidth = 1.2,
+    colour = "#0072B2"
+  ) +
+  coord_cartesian(ylim = resid_sim_limits) +
+  labs(
+    title = "Квадратичная зависимость учтена",
+    subtitle = "Модель: Y ~ I(X^2)",
+    x = expression(hat(y)),
+    y = "Остаток"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+
+library(patchwork)
+
+p_sim_linear | p_sim_quad
+```
+
+
+## Диагностика линейной регрессии: гомоскедастичность
+
+- В случае линейной регрессии мы считаем, что условная дисперсия одинакова на разных уровнях независимой переменной
+- Нарушение означает, что есть какой-то дополнительный фактор, который сильнее и сильнее влияет на зависимую переменную при уходе вверх или вниз вдоль диапазона значений (или что модель неправильно специфицирована)
+- Диагностируется тоже графиком остатков
+
+## Диагностика линейной регрессии: влиятельные наблюдения
