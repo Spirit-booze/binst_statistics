@@ -6,25 +6,392 @@ output:  slidy_presentation
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+
+#install.packages('HistData')
+#install.packages('palmerpenguins')
+#install.packages("ggResidpanel")
+#install.packages('ggfortify')
+
+data(GaltonFamilies, package = "HistData")
+penguins <- na.omit(palmerpenguins::penguins)
+data(cars)
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 8,
+  fig.height = 4.4
+)
+
+library(dplyr)
+library(ggplot2)
+
+theme_set(theme_bw(base_size = 15))
+
 ```
 
-## R Markdown
+## Что мы уже умеем: один предиктор - одна линия
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Модель простой линейной регрессии:
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+$$y_i = \beta_0 + \beta_1 x_i + \varepsilon_i, \qquad E(Y \mid X = x) = \beta_0 + \beta_1 x$$
 
-```{r cars}
-summary(cars)
+По выборке подбираем оценки $\hat\beta_0, \hat\beta_1$ так, чтобы **сумма квадратов
+вертикальных отклонений точек от линии** была минимальной:
+
+$$RSS = \sum_{i=1}^{n}\left(y_i - \hat y_i\right)^2 =
+\sum_{i=1}^{n}\left(y_i - \hat\beta_0 - \hat\beta_1 x_i\right)^2 \longrightarrow \min$$
+
+Красные отрезки - остатки $e_i = y_i - \hat y_i$.
+
+```{r recap-simple-lm, fig.height=5, fig.width=7}
+library(HistData)
+library(dplyr)
+library(ggplot2)
+
+set.seed(42)
+galton <- GaltonFamilies |>
+  group_by(family) |>
+  slice_sample(n = 1) |>
+  ungroup()
+
+fit_simple <- lm(childHeight ~ midparentHeight, data = galton)
+galton <- galton |> mutate(fitted = fitted(fit_simple))
+
+ggplot(galton, aes(x = midparentHeight, y = childHeight)) +
+  geom_point(alpha = 0.6) +
+  geom_segment(aes(xend = midparentHeight, yend = fitted),
+               colour = "tomato", alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, colour = "steelblue", linewidth = 1) +
+  labs(x = "Средний рост родителей, дюймы",
+       y = "Рост ребёнка, дюймы")
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
+## А если предикторов больше одного?
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+Рост ребёнка вряд ли зависит **только** от усреднённого роста родителей:
+
+- рост отца и рост матери — по отдельности;
+- пол ребёнка;
+- питание, условия жизни, ...
+
+Один предиктор почти никогда не объясняет отклик полностью. Обобщаем модель
+условного среднего:
+
+$$E(Y \mid X_1 = x_1, \ldots, X_p = x_p) = \beta_0 + \beta_1 x_1 + \ldots + \beta_p x_p$$
+
+Вопросы, на которые предстоит ответить:
+
+- **Геометрически**: что мы теперь подбираем, если не линию?
+- **Вычислительно**: как оценить $p+1$ коэффициент?
+- **Содержательно**: как интерпретировать каждый $\beta_j$?
+
+## Два предиктора: вместо линии — плоскость
+
+Модель $y_i = \beta_0 + \beta_1 x_{1i} + \beta_2 x_{2i} + \varepsilon_i$
+задаёт **плоскость в трёхмерном пространстве**, оси которого — два предиктора и отклик.
+
+```{r regression-plane, fig.height=6, fig.width=7}
+library(plot3D)
+
+fit_plane <- lm(childHeight ~ father + mother, data = galton)
+
+# Регулярная сетка предикторов для отрисовки плоскости
+father_grid <- seq(min(galton$father), max(galton$father), length.out = 20)
+mother_grid <- seq(min(galton$mother), max(galton$mother), length.out = 20)
+grid_xy <- expand.grid(father = father_grid, mother = mother_grid)
+plane_z <- matrix(predict(fit_plane, newdata = grid_xy), nrow = 20, ncol = 20)
+
+scatter3D(x = galton$father, y = galton$mother, z = galton$childHeight,
+          pch = 19, cex = 0.8, theta = 30, phi = 15,
+          ticktype = "detailed",
+          surf = list(x = father_grid, y = mother_grid, z = plane_z,
+                      facets = NA, fit = fitted(fit_plane)),
+          xlab = "Рост отца", ylab = "Рост матери",
+          zlab = "Рост ребёнка", main = "")
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Геометрическая интерпретация: много предикторов
+
+$$y_i = \beta_0 + \beta_1 x_{1i} + \beta_2 x_{2i} + \beta_3 x_{3i} + \ldots + \beta_p x_{pi} + \varepsilon_i$$
+
+Гиперплоскость в $(p+1)$-мерном пространстве: $p$ осей — значения предикторов,
+ещё одна ось — отклик.
+
+Нарисовать её нельзя — но это та же «линия наилучшего приближения»,
+подбираемая тем же МНК.
+
+## N предикторов: что меняется, а что — нет
+
+**Не меняется:**
+
+- принцип МНК — минимум суммы квадратов вертикальных отклонений;
+- остатки $e_i = y_i - \hat y_i$ и их отличие от ненаблюдаемых ошибок $\varepsilon_i$;
+- разложение изменчивости $SS_t = SS_r + SS_e$.
+
+**Меняется и добавляется:**
+
+- интерпретация коэффициента: $\beta_j$ — изменение отклика при изменении $x_j$
+  на единицу **при неизменных остальных предикторах**;
+- вычисления — удобно записывать в матричной форме $\mathbf{Y} = \mathbf{X}\boldsymbol\beta + \boldsymbol\varepsilon$;
+- значимость: t-тесты отдельных коэффициентов и общий F-тест модели —
+  теперь это **разные** вопросы;
+- $R^2$ и его скорректированная версия $R^2_{adj}$;
+- новая проблема: мультиколлинеарность предикторов;
+- категориальные предикторы и взаимодействия.
+
+## Новый пример: пингвины Палмера
+
+Данные об антарктических пингвинах с метеостанции Палмер
+(архипелаг Палмер, Антарктида; программа LTER, 2007--2009).
+
+Пакет `palmerpenguins`, 344 пингвина трёх видов. Для каждого измерены:
+
+- `bill_length_mm`, `bill_depth_mm` — длина и глубина клюва, мм;
+- `flipper_length_mm` — длина ласта, мм;
+- `body_mass_g` — масса тела, г;
+- `species`, `island`, `sex` — вид, остров, пол.
+
+![](https://cdn.blot.im/blog_a11fcc1a03b8427687759780d58b9179/_image_cache/44ceb927-d472-4c18-98ec-fe788a6eff2d.png){width=24%}
+![](https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRjv3Y2DDwUqQI1mKrF9gsnu9OMA2rqFIbUtCIBB4xSoQ&s=10){width=12%}
+
+<small>Иллюстрации: Allison Horst.</small>
+
+## Первый взгляд на данные
+
+```{r penguins-summary}
+penguins |>
+  select(bill_length_mm, flipper_length_mm, body_mass_g, species) |>
+  summary()
+```
+
+
+## Разведочный анализ
+
+```{r penguins-eda, fig.width=10, fig.height=4.2}
+library(patchwork) # при необходимости: install.packages("patchwork")
+
+g_flip <- ggplot(penguins,
+                 aes(x = flipper_length_mm, y = bill_length_mm)) +
+  geom_point(aes(colour = species), alpha = 0.7) +
+  geom_smooth(aes(colour = species), method = "lm", se = FALSE) +
+  geom_smooth(method = "lm", se = FALSE, colour = "black", linetype = "dashed") +
+  labs(x = "Длина ласта, мм", y = "Длина клюва, мм", colour = "Вид")
+
+g_mass <- g_flip %+% aes(x = body_mass_g) + labs(x = "Масса тела, г")
+
+g_flip + g_mass
+```
+
+## Исследовательский вопрос
+
+Можно ли моделировать **длину клюва** пингвина по:
+
+- длине ласта;
+- массе тела;
+- принадлежности к виду?
+
+Модель:
+
+$$bill\_length_i = \beta_0 + \beta_1 \cdot flipper_i + \beta_2 \cdot mass_i +
+\beta_3 \cdot Chinstrap_i + \beta_4 \cdot Gentoo_i + \varepsilon_i$$
+
+`species` — фактор с тремя уровнями, в модель он войдёт как два индикатора;
+базовый уровень — Adelie. Подробно разберём это позже.
+
+## Допущения линейной регрессии: повторение
+
+Всё, что мы требовали в простой регрессии, остаётся в силе:
+
+1. **Линейность**: условное среднее $E(Y \mid X_1, \ldots, X_p)$ — линейная
+   функция предикторов (правильная спецификация).
+2. **Независимость** наблюдений (ошибок).
+3. **Гомоскедастичность**: $\mathrm{Var}(\varepsilon_i \mid X) = \sigma^2$.
+4. **Нормальность ошибок** — нужна для точных t- и F-процедур в малых выборках,
+   не для несмещённости МНК.
+
+**Добавляется новое требование множественной регрессии:**
+
+5. **Отсутствие сильной мультиколлинеарности** — предикторы не должны быть
+   (почти) линейно выразимы друг через друга.
+
+Инструменты диагностики прежние — остатки против предсказанных, Q-Q,
+scale-location, leverage / Cook's D — плюс новые: остатки против *каждого*
+предиктора и показатели коллинеарности (VIF).
+
+## Мультиколлинеарность
+
+Мультиколлинеарность - наличие линейной зависимости между независимыми предикторами
+в регрессионной модели.
+
+При наличии мультиколлинеарности в общем случае раздуваются стандартные ошибки 
+коэффициентов, в худших случаях коэффициенты становятся в принципе неинтерпретируемы.
+
+### Косвенные признаки мультиколлинеарности
+
+- Большие ошибки
+- Широкие доверительные интервалы, содержащие ноль, на всех коэффициентах, при
+этом общий F-тест для модели говорит о стат значимости
+
+### Как тестировать наличие мультиколлинеарности
+
+- Матрица корреляций (плохой метод?)
+- Фактор инфляции дисперии (variance inflation factor, VIF)
+
+## Почему мы очень не хотим иметь мультиколлинеарные предикторы
+
+Полная мультиколлинеарность означает, что 1 из предикторов полностью объясняется
+линейной комбинацией других предикторов
+
+В такой ситуации модель не будет иметь решения
+
+В случае неполной коллинеарности раздуваются ошибки коэффициентов, и ими нельзя пользоваться
+
+Результатам тестов отдельных предикторов в такой ситуации не следует доверять.
+
+## Как бороться с мультиколлинеарностью
+
+Откапывать предикторы с набольшим уровнем VIF (порог варьирует, но обычно 5-10 уже 
+основание присмотреться)
+
+Убирать их (если они не являются биологически важными). Плохо, если удаляемый 
+предиктор биологически значим
+
+Объединять предикторы (брать среднее, PCA производное и т.д.). Лучше, но при замене
+могут появиться проблемы с интерпретируемостью.
+
+## Variance inflation factor (VIF)
+
+**Идея**: насколько хорошо предиктор $x_j$ сам можно смоделировать
+линейной комбинацией остальных предикторов?
+
+Для каждого предиктора $j$ строим вспомогательную регрессию
+(отклик $y$ в ней не участвует):
+
+$$x_j = c_0 + c_1 x_1 + \ldots + c_{j-1}x_{j-1} + c_{j+1}x_{j+1} + \ldots + c_p x_p$$
+
+$R_j^2$ этой регрессии — доля изменчивости $x_j$, объяснённая остальными
+предикторами. Тогда:
+
+$$VIF_j = \frac{1}{1 - R_j^2}$$
+
+- $R_j^2 = 0$ — предиктор ортогонален остальным → $VIF_j = 1$, раздувания нет;
+- $R_j^2 \to 1$ — почти точная линейная комбинация → $VIF_j \to \infty$.
+
+**Почему «инфляция дисперсии»**: дисперсия оценки коэффициента раздувается
+ровно во столько раз:
+
+$$\mathrm{Var}(\hat\beta_j) = \frac{\sigma^2}{(n-1)\,s_j^2}\cdot VIF_j
+\qquad\Rightarrow\qquad SE(\hat\beta_j) \text{ растёт в } \sqrt{VIF_j} \text{ раз}$$
+
+$VIF_j = 9$ → стандартная ошибка в 3 раза больше, чем была бы при том же
+разбросе $x_j$, но без связи с остальными предикторами.
+
+```{r vif-penguins}
+library(car)
+
+fit_peng_cont <- lm(bill_length_mm ~ flipper_length_mm + body_mass_g,
+                    data = penguins)
+vif(fit_peng_cont)
+```
+
+## Линейность: теперь смотрим по каждому предиктору
+
+В простой регрессии хватало «остатки против x» и «остатки против ŷ» —
+это был один и тот же по сути график.
+
+Во множественной регрессии ŷ смешивает все предикторы: паттерн в
+«остатки против ŷ» сигналит о проблеме, но не говорит, в каком предикторе.
+
+Правило то же: **остатки не должны иметь систематического паттерна** —
+против ŷ и против каждого предиктора в отдельности.
+
+```{r linearity-multiple}
+library(ggResidpanel)
+
+resid_xpanel(fit_peng_cont, smoother = TRUE)
+```
+
+```{r diagnostics-panel, fig.width=9, fig.height=6}
+library(ggfortify)
+
+autoplot(fit_peng_cont, which = 1:4, ncol = 2)
+```
+
+## Высокий leverage: аномальная комбинация предикторов
+
+Точка может быть нетипичной **по комбинации** предикторов, оставаясь
+обычной по каждому из них в отдельности. На одномерных графиках её не видно.
+
+```{r leverage-combination, fig.width=10, fig.height=4.2, echo=FALSE}
+set.seed(1)
+n <- 60
+x1 <- rnorm(n)
+x2 <- 0.7 * x1 + sqrt(1 - 0.7^2) * rnorm(n)  # коррелированные предикторы
+y  <- 1 + 2 * x1 + x2 + rnorm(n, sd = 0.8)
+
+# Точка вне облака пары (x1, x2), но в пределах диапазона каждой оси;
+# y задаём в точности по модели
+d_sim <- rbind(data.frame(x1, x2, y),
+               data.frame(x1 = 2.2, x2 = -2.2, y = 1 + 2 * 2.2 - 2.2))
+
+fit_sim <- lm(y ~ x1 + x2, data = d_sim)
+
+g_space <- ggplot(d_sim, aes(x1, x2)) +
+  geom_point(alpha = 0.6) +
+  geom_point(data = d_sim[n + 1, ], colour = "red", size = 3) +
+  labs(title = "Пространство предикторов")
+
+g_lev <- ggplot(data.frame(i = 1:(n + 1), h = hatvalues(fit_sim)), aes(i, h)) +
+  geom_col() +
+  geom_col(data = \(x) x[n + 1, , drop = FALSE], fill = "red") +
+  labs(title = "Leverage h_ii", x = "Номер наблюдения", y = "h")
+
+library(patchwork)
+g_space + g_lev
+```
+
+По каждому предиктору красная точка внутри диапазона — маргинально она
+«нормальная». Но её leverage на порядок выше остальных.
+
+Остаток у неё маленький (y взят из модели), поэтому Cook's D тоже мал:
+**leverage — лишь потенциал влияния**. Отклоним её y — станет влиятельной.
+
+## R²: определение прежнее, свойство новое
+
+Определение не меняется:
+
+$$R^2 = \frac{SS_r}{SS_t} = 1 - \frac{SS_e}{SS_t}$$
+
+Но интерпретация $R^2 = r^2$ (квадрат корреляции с предиктором) уходит —
+остаётся $R^2 = \mathrm{cor}(y, \hat y)^2$.
+
+**Новое и неприятное свойство**: $R^2$ не убывает при добавлении
+**любого** предиктора, даже бессмысленного шума. «Чем больше членов,
+тем лучше» — ложный вывод.
+
+Поэтому — скорректированный $R^2$ со штрафом за число параметров:
+
+$$R^2_{adj} = 1 - (1 - R^2)\,\frac{n-1}{n-p-1}$$
+
+```{r r2-adjusted}
+set.seed(42)
+penguins_noise <- penguins |>
+  mutate(noise1 = rnorm(n()), noise2 = rnorm(n()), noise3 = rnorm(n()))
+
+m_base  <- lm(bill_length_mm ~ flipper_length_mm + body_mass_g,
+              data = penguins_noise)
+m_noise <- update(m_base, . ~ . + noise1 + noise2 + noise3)
+
+data.frame(
+  model  = c("базовая", "+ 3 шумовых предиктора"),
+  R2     = c(summary(m_base)$r.squared,  summary(m_noise)$r.squared),
+  R2_adj = c(summary(m_base)$adj.r.squared, summary(m_noise)$adj.r.squared)
+)
+```
+
+$R^2$ чуть вырос, $R^2_{adj}$ — нет (чаще чуть падает). В отчётах
+множественной регрессии приводим $R^2_{adj}$.
