@@ -837,20 +837,7 @@ ggplot(gf_plot, aes(x = midparentHeight, y = childHeight)) +
   )
 ```
 
-## Допущения модели
-
-- При выполнении определённых условий (согласно теореме Гаусса-Маркова и некоторым другим) метод наименьших квадратов (МНК) даёт даёт наилучшие линейные несмещённые оценки параметров модели
-- Что значит "наилучшие"?
-
-## Наилучшие оценки модели при линейной регрессии
-
-- Вообще вычислимы
-- Несмещённые
-- Имеют наименьшую дисрерсию (точные)
-- На этих коэффициентах можно прогонять стат тесты
-- В данных нет какой-то структуры или "особенных" наблюдений, которые искажали бы или стягивали на себя состояние модели
-
-## От ошибок модели к остаткам: диагностика регрессии
+## От ошибок модели к остаткам
 
 Модель в генеральной совокупности:
 
@@ -868,6 +855,35 @@ e_i=y_i-\widehat y_i .
 
 - Здесь \(\varepsilon_i\) — ненаблюдаемая ошибка модели, а \(e_i\) — вычисленный остаток, её оценка. 
 - Остатки можно преобразовывать различными способами, но анализ их распределения и возможных паттернов — ключ к диагностике регрессии.
+
+## Обычные и стандартизованные остатки
+
+**Обычные остатки:**
+
+\[
+e_i=y_i-\widehat y_i.
+\]
+
+- Измеряются в единицах отклика \(Y\).
+- Используются для поиска систематических паттернов, например нелинейности на графике остатков против предсказанных значений.
+- По ним также можно увидеть изменение разброса, но при разных leverage их дисперсии различаются даже при гомоскедастичных ошибках:
+
+\[
+\operatorname{Var}(e_i)=\sigma^2(1-h_{ii}).
+\]
+
+**Стандартизованные остатки** в терминах `rstandard()`:
+
+\[
+r_i=
+\frac{e_i}
+{\widehat\sigma\sqrt{1-h_{ii}}}.
+\]
+
+- Не имеют единиц измерения и учитывают leverage наблюдения.
+- Удобны для сравнения разброса остатков, построения scale-location plot и поиска необычно больших отклонений.
+- Используются при оценке нормальности остатков.
+- Стандартизация не устраняет гетероскедастичность: изменение разброса по-прежнему будет видно на графике.
 
 ```{r galton-residual-diagnostics, echo=FALSE, fig.width=11, fig.height=4.8}
 library(patchwork)
@@ -967,6 +983,716 @@ p_right <- ggplot(
 
 p_left | p_right
 ```
+
+```{r galton-anova-setup, echo=FALSE}
+fit_galton_anova <- lm(
+  childHeight ~ midparentHeight,
+  data = gf
+)
+
+y_bar <- mean(gf$childHeight)
+
+galton_anova <- gf |>
+  mutate(
+    fitted = fitted(fit_galton_anova),
+    residual = residuals(fit_galton_anova)
+  )
+
+# Наблюдение, для которого y_i > hat(y_i) > bar(y)
+anova_point <- galton_anova |>
+  filter(
+    childHeight > fitted,
+    fitted > y_bar
+  ) |>
+  slice_max(
+    order_by = childHeight - y_bar,
+    n = 1,
+    with_ties = FALSE
+  )
+
+x0 <- anova_point$midparentHeight
+y0 <- anova_point$childHeight
+fitted0 <- anova_point$fitted
+
+anova_xlim <- range(galton_anova$midparentHeight) + c(-0.8, 1.2)
+anova_ylim <- range(galton_anova$childHeight) + c(-1, 1)
+```
+
+## Модель без предиктора: только общее среднее
+
+Если предиктор не используется, всем наблюдениям соответствует один и тот же прогноз:
+
+\[
+\widehat y_i=\bar y.
+\]
+
+Отклонения наблюдений от общего среднего образуют **общую изменчивость**:
+
+\[
+SS_t=\sum_{i=1}^{n}(y_i-\bar y)^2.
+\]
+
+```{r galton-total-variation, echo=FALSE, fig.width=9, fig.height=4.8}
+ggplot(
+  galton_anova,
+  aes(x = midparentHeight, y = childHeight)
+) +
+  geom_segment(
+    aes(
+      xend = midparentHeight,
+      yend = y_bar
+    ),
+    colour = "grey75",
+    linewidth = 0.6
+  ) +
+  geom_point(
+    colour = "grey40",
+    alpha = 0.6,
+    size = 1.8
+  ) +
+  geom_hline(
+    yintercept = y_bar,
+    colour = "#0072B2",
+    linewidth = 1.2
+  ) +
+  geom_segment(
+    data = anova_point,
+    aes(
+      x = midparentHeight,
+      xend = midparentHeight,
+      y = childHeight,
+      yend = y_bar
+    ),
+    colour = "grey20",
+    linewidth = 1.4
+  ) +
+  geom_point(
+    data = anova_point,
+    size = 3.5,
+    colour = "black"
+  ) +
+  annotate(
+    "text",
+    x = x0 + 0.25,
+    y = (y0 + y_bar) / 2,
+    label = "y[i] - bar(y)",
+    parse = TRUE,
+    hjust = 0,
+    size = 5
+  ) +
+  annotate(
+    "text",
+    x = min(galton_anova$midparentHeight),
+    y = y_bar + 0.5,
+    label = "bar(y)",
+    parse = TRUE,
+    colour = "#0072B2",
+    hjust = 0,
+    size = 5
+  ) +
+  coord_cartesian(
+    xlim = anova_xlim,
+    ylim = anova_ylim
+  ) +
+  labs(
+    title = "Общая изменчивость",
+    subtitle = expression(SS[t] == sum((y[i] - bar(y))^2)),
+    x = "Средний рост родителей, дюймы",
+    y = "Рост ребёнка, дюймы"
+  )
+```
+
+## Что добавляет регрессия?
+
+Теперь прогноз зависит от значения предиктора:
+
+\[
+\widehat y_i=\widehat\beta_0+\widehat\beta_1x_i.
+\]
+
+Полное отклонение наблюдения от общего среднего раскладывается на две части:
+
+\[
+\underbrace{y_i-\bar y}_{\text{полное отклонение}}
+=
+\underbrace{\widehat y_i-\bar y}_{\text{описано регрессией}}
++
+\underbrace{y_i-\widehat y_i}_{\text{остаток}}.
+\]
+
+```{r galton-one-point-decomposition, echo=FALSE, fig.width=9, fig.height=5}
+decomposition_segments <- data.frame(
+  part = c("total", "explained", "residual"),
+  x = c(x0 - 0.22, x0 + 0.05, x0 + 0.28),
+  xend = c(x0 - 0.22, x0 + 0.05, x0 + 0.28),
+  y = c(y_bar, y_bar, fitted0),
+  yend = c(y0, fitted0, y0)
+)
+
+decomposition_labels <- data.frame(
+  part = c("total", "explained", "residual"),
+  x = c(x0 - 0.35, x0 + 0.05, x0 + 0.4),
+  y = c(
+    (y_bar + y0) / 2,
+    (y_bar + fitted0) / 2,
+    (fitted0 + y0) / 2
+  ),
+  label = c(
+    "y[i] - bar(y)",
+    "hat(y)[i] - bar(y)",
+    "y[i] - hat(y)[i]"
+  )
+)
+
+decomposition_colours <- c(
+  total = "grey35",
+  explained = "#0072B2",
+  residual = "#D55E00"
+)
+
+ggplot(
+  galton_anova,
+  aes(x = midparentHeight, y = childHeight)
+) +
+  geom_point(
+    colour = "grey65",
+    alpha = 0.55,
+    size = 1.8
+  ) +
+  geom_hline(
+    yintercept = y_bar,
+    linetype = 2,
+    colour = "grey45",
+    linewidth = 1
+  ) +
+  geom_abline(
+    intercept = unname(coef(fit_galton_anova)[1]),
+    slope = unname(coef(fit_galton_anova)[2]),
+    colour = "#0072B2",
+    linewidth = 1.2
+  ) +
+  geom_segment(
+    data = decomposition_segments,
+    aes(
+      x = x,
+      xend = xend,
+      y = y,
+      yend = yend,
+      colour = part
+    ),
+    inherit.aes = FALSE,
+    linewidth = 1.5
+  ) +
+  geom_point(
+    data = anova_point,
+    size = 4,
+    colour = "black"
+  ) +
+  geom_point(
+    aes(x = x0, y = fitted0),
+    shape = 21,
+    size = 4,
+    fill = "#0072B2",
+    colour = "white"
+  ) +
+  geom_point(
+    aes(x = x0, y = y_bar),
+    shape = 22,
+    size = 3.5,
+    fill = "grey60",
+    colour = "white"
+  ) +
+  geom_text(
+    data = decomposition_labels,
+    aes(
+      x = x,
+      y = y,
+      label = label,
+      colour = part
+    ),
+    inherit.aes = FALSE,
+    parse = TRUE,
+    size = 4.5,
+    show.legend = FALSE
+  ) +
+  scale_colour_manual(
+    values = decomposition_colours
+  ) +
+  coord_cartesian(
+    xlim = anova_xlim,
+    ylim = anova_ylim
+  ) +
+  labs(
+    title = "Отклонение одного наблюдения: от среднего к линии регрессии",
+    x = "Средний рост родителей, дюймы",
+    y = "Рост ребёнка, дюймы"
+  ) +
+  theme(legend.position = "none")
+```
+
+## Три компоненты изменчивости
+
+После возведения в квадрат и суммирования по всем наблюдениям получаем:
+
+\[
+SS_t=SS_r+SS_e.
+\]
+
+```{r galton-three-variations, echo=FALSE, fig.width=14, fig.height=4.8}
+p_total <- ggplot(
+  galton_anova,
+  aes(x = midparentHeight, y = childHeight)
+) +
+  geom_segment(
+    aes(
+      xend = midparentHeight,
+      yend = y_bar
+    ),
+    colour = "grey70",
+    linewidth = 0.6
+  ) +
+  geom_hline(
+    yintercept = y_bar,
+    colour = "grey30",
+    linewidth = 1
+  ) +
+  geom_point(
+    colour = "grey40",
+    alpha = 0.6,
+    size = 1.5
+  ) +
+  coord_cartesian(
+    xlim = anova_xlim,
+    ylim = anova_ylim
+  ) +
+  labs(
+    title = "Общая изменчивость",
+    subtitle = expression(SS[t] == sum((y[i] - bar(y))^2)),
+    x = NULL,
+    y = "Рост ребёнка"
+  )
+
+p_explained <- ggplot(
+  galton_anova,
+  aes(x = midparentHeight, y = childHeight)
+) +
+  geom_segment(
+    aes(
+      xend = midparentHeight,
+      y = y_bar,
+      yend = fitted
+    ),
+    colour = "#0072B2",
+    linewidth = 0.7,
+    alpha = 0.75
+  ) +
+  geom_hline(
+    yintercept = y_bar,
+    colour = "grey40",
+    linewidth = 1
+  ) +
+  geom_abline(
+    intercept = unname(coef(fit_galton_anova)[1]),
+    slope = unname(coef(fit_galton_anova)[2]),
+    colour = "#0072B2",
+    linewidth = 1.1
+  ) +
+  geom_point(
+    colour = "grey65",
+    alpha = 0.5,
+    size = 1.5
+  ) +
+  coord_cartesian(
+    xlim = anova_xlim,
+    ylim = anova_ylim
+  ) +
+  labs(
+    title = "Описано регрессией",
+    subtitle = expression(SS[r] == sum((hat(y)[i] - bar(y))^2)),
+    x = "Средний рост родителей",
+    y = NULL
+  )
+
+p_residual <- ggplot(
+  galton_anova,
+  aes(x = midparentHeight, y = childHeight)
+) +
+  geom_segment(
+    aes(
+      xend = midparentHeight,
+      yend = fitted
+    ),
+    colour = "#D55E00",
+    linewidth = 0.7,
+    alpha = 0.75
+  ) +
+  geom_abline(
+    intercept = unname(coef(fit_galton_anova)[1]),
+    slope = unname(coef(fit_galton_anova)[2]),
+    colour = "#0072B2",
+    linewidth = 1.1
+  ) +
+  geom_point(
+    colour = "grey40",
+    alpha = 0.6,
+    size = 1.5
+  ) +
+  coord_cartesian(
+    xlim = anova_xlim,
+    ylim = anova_ylim
+  ) +
+  labs(
+    title = "Остаточная изменчивость",
+    subtitle = expression(SS[e] == sum((y[i] - hat(y)[i]))^2),
+    x = NULL,
+    y = NULL
+  )
+
+anova_panel_theme <- theme(
+  plot.title = element_text(size = 15, face = "bold"),
+  plot.subtitle = element_text(size = 11),
+  axis.title = element_text(size = 12)
+)
+
+library(patchwork)
+
+(p_total + anova_panel_theme) |
+  (p_explained + anova_panel_theme) |
+  (p_residual + anova_panel_theme)
+```
+
+## Коэффициент детерминации
+
+\[
+R^2=\frac{SS_r}{SS_t}
+=1-\frac{SS_e}{SS_t}
+\]
+
+- \(R^2\) — доля выборочной изменчивости \(Y\), описанная моделью.
+- Высокий \(R^2\) не доказывает правильность спецификации модели.
+- Низкий \(R^2\) не означает отсутствие связи.
+- \(R^2\) ничего не говорит о причинности.
+- В случае простой (парной) линейной регрессии \(R^2=r^2\), где \(r\) — коэффициент корреляции Пирсона между \(X\) и \(Y\).
+
+
+## Оценка дисперсии ошибки
+
+Для простой линейной регрессии:
+
+\[
+MS_e=\frac{SS_e}{n-2}
+=\frac{\sum_{i=1}^{n}e_i^2}{n-2},
+\qquad
+\widehat\sigma=\sqrt{MS_e}.
+\]
+
+- \(n-2\) — число степеней свободы остатка: из \(n\) наблюдений оцениваются два коэффициента, \(\widehat\beta_0\) и \(\widehat\beta_1\).
+- \(MS_e\) — выборочная оценка дисперсии ошибок \(\sigma^2\).
+- \(\widehat\sigma\) называется **остаточной стандартной ошибкой** (*residual standard error*) и измеряется в единицах отклика \(Y\).
+- Она характеризует разброс наблюдений вокруг линии регрессии и далее используется при расчёте стандартных ошибок коэффициентов.
+
+## Выборочная регрессия vs регрессия в генеральной совокупности
+
+```{r sampling-population-setup, echo=FALSE}
+set.seed(2026)
+
+N <- 1000
+beta0 <- 2
+beta1 <- 1.5
+sigma <- 3
+
+population <- data.frame(
+  x = runif(N, min = 0, max = 10)
+)
+
+population$y <- beta0 +
+  beta1 * population$x +
+  rnorm(N, mean = 0, sd = sigma)
+
+n_sample <- 100
+n_samples <- 4
+
+samples <- bind_rows(
+  lapply(seq_len(n_samples), function(k) {
+    population |>
+      slice_sample(n = n_sample) |>
+      mutate(sample = factor(k))
+  })
+)
+
+sample_fits <- lapply(
+  split(samples, samples$sample),
+  function(d) lm(y ~ x, data = d)
+)
+
+sample_lines <- data.frame(
+  sample = factor(names(sample_fits)),
+  intercept = sapply(
+    sample_fits,
+    function(fit) unname(coef(fit)[1])
+  ),
+  slope = sapply(
+    sample_fits,
+    function(fit) unname(coef(fit)[2])
+  )
+)
+
+sample_colours <- c(
+  "1" = "#0072B2",
+  "2" = "#D55E00",
+  "3" = "#009E73",
+  "4" = "#CC79A7"
+)
+
+plot_xlim <- c(0, 10)
+plot_ylim <- range(population$y) + c(-1, 1)
+```
+
+## Генеральная совокупность: истинные параметры
+
+Здесь линия задана неизвестными на практике параметрами генеральной совокупности \(\beta_0\) и \(\beta_1\).
+
+```{r sampling-population-plot, echo=FALSE, fig.width=9, fig.height=5}
+population_label <- data.frame(
+  x = 5,
+  y = beta0 + beta1 * 5,
+  label = sprintf(
+    'beta[0] == %.1f * "," ~ beta[1] == %.1f',
+    beta0,
+    beta1
+  )
+)
+
+ggplot(population, aes(x = x, y = y)) +
+  geom_point(
+    colour = "grey65",
+    alpha = 0.5,
+    size = 1.8
+  ) +
+  geom_abline(
+    intercept = beta0,
+    slope = beta1,
+    colour = "#D62728",
+    linewidth = 1.4
+  ) +
+  geom_label(
+    data = population_label,
+    aes(x = x, y = y, label = label),
+    parse = TRUE,
+    colour = "#D62728",
+    fill = "white",
+    size = 5
+  ) +
+  coord_cartesian(
+    xlim = plot_xlim,
+    ylim = plot_ylim
+  ) +
+  labs(
+    title = "Генеральная совокупность: 1000 наблюдений",
+    subtitle = expression(
+      E(Y * "|" * X == x) == beta[0] + beta[1] * x
+    ),
+    x = "X",
+    y = "Y"
+  )
+```
+
+## Случайные выборки: оценки параметров
+
+Каждая выборка даёт собственные оценки \(\widehat\beta_0\) и \(\widehat\beta_1\), а значит — собственную линию регрессии.
+
+```{r sampling-estimates-plot, echo=FALSE, fig.width=9, fig.height=5}
+sample_lines$x_label <- seq(2, 7, length.out = n_samples)
+
+sample_lines$y_label <- sample_lines$intercept +
+  sample_lines$slope * sample_lines$x_label
+
+sample_lines$label <- sprintf(
+  'hat(beta)[0] == %.2f * "," ~ hat(beta)[1] == %.2f',
+  sample_lines$intercept,
+  sample_lines$slope
+)
+
+ggplot() +
+  geom_point(
+    data = population,
+    aes(x = x, y = y),
+    colour = "grey85",
+    alpha = 0.55,
+    size = 1.5
+  ) +
+  geom_point(
+    data = samples,
+    aes(x = x, y = y, colour = sample),
+    alpha = 0.5,
+    size = 1.8
+  ) +
+  geom_abline(
+    data = sample_lines,
+    aes(
+      intercept = intercept,
+      slope = slope,
+      colour = sample
+    ),
+    linewidth = 1.3
+  ) +
+  geom_label(
+    data = sample_lines,
+    aes(
+      x = x_label,
+      y = y_label,
+      label = label,
+      colour = sample
+    ),
+    parse = TRUE,
+    fill = "white",
+    size = 3.8,
+    show.legend = FALSE
+  ) +
+  scale_colour_manual(values = sample_colours) +
+  coord_cartesian(
+    xlim = plot_xlim,
+    ylim = plot_ylim
+  ) +
+  labs(
+    title = "Четыре случайные выборки по 100 наблюдений",
+    subtitle = "Одна генеральная совокупность — четыре разные оценки линии",
+    x = "X",
+    y = "Y",
+    colour = "Выборка"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+## Стандартная ошибка наклона
+
+Разные выборки дают разные значения \(\widehat\beta_1\). Стандартная ошибка описывает изменчивость этой оценки.
+
+Обозначим:
+
+\[
+S_{xx}=\sum_{i=1}^{n}(x_i-\bar{x})^2.
+\]
+
+Тогда:
+
+\[
+SE(\widehat\beta_1)
+=
+\sqrt{\frac{MS_e}{S_{xx}}}
+=
+\sqrt{
+\frac{MS_e}
+{\sum_{i=1}^{n}(x_i-\bar{x})^2}
+}.
+\]
+
+- \(SE(\widehat\beta_1)\) — оценка стандартного отклонения **выборочного распределения наклона**, а не разброса исходных значений \(Y\).
+- Чем больше остаточная изменчивость \(MS_e\), тем больше стандартная ошибка.
+- Чем больше наблюдений и чем шире разброс значений \(X\), тем больше \(S_{xx}\) и тем меньше стандартная ошибка.
+
+## Доверительный интервал для коэффициента
+
+Для коэффициента \(\beta_j\), где \(j=0,1\), интервал с уровнем доверия \(1-\alpha\) строится как:
+
+\[
+\widehat\beta_j
+\pm
+t_{1-\alpha/2,\;n-2}\,
+SE(\widehat\beta_j).
+\]
+
+Для 95% доверительного интервала \(\alpha=0{,}05\).
+
+- Доверительный интервал относится к параметру генеральной совокупности, а не к отдельным наблюдениям \(Y\).
+- При многократном повторении выборки примерно 95% построенных таким образом интервалов накроют истинное значение коэффициента.
+- Для точной t-формулы при малых выборках дополнительно предполагается нормальность ошибок.
+
+## Проверка гипотезы о коэффициенте
+
+Для наклона обычно проверяют:
+
+\[
+H_0:\beta_1=0,
+\qquad
+H_A:\beta_1\neq0.
+\]
+
+Тестовая статистика:
+
+\[
+t=
+\frac{\widehat\beta_1-0}
+{SE(\widehat\beta_1)}
+=
+\frac{\widehat\beta_1}
+{SE(\widehat\beta_1)},
+\qquad
+df=n-2.
+\]
+
+- Нулевая гипотеза означает отсутствие линейной связи между \(X\) и условным средним \(Y\).
+- Такой же принцип используется для проверки гипотез об интерсепте и о других заданных значениях коэффициента.
+- Если двусторонний \((1-\alpha)\)-интервал не содержит \(\beta_{1,0}\), соответствующий двусторонний t-тест отвергает \(H_0:\beta_1=\beta_{1,0}\) на уровне \(\alpha\).
+- Статистическая значимость сама по себе не говорит ни о величине эффекта, ни о причинности.
+
+## Общая значимость простой регрессии
+
+У регрессии с одним предиктором:
+
+\[
+df_r=1,
+\qquad
+MS_r=\frac{SS_r}{1}=SS_r,
+\qquad
+MS_e=\frac{SS_e}{n-2}.
+\]
+
+Общий F-тест:
+
+\[
+F=\frac{MS_r}{MS_e}.
+\]
+
+При выполнении допущений и \(H_0:\beta_1=0\):
+
+\[
+F\sim F_{1,\;n-2}.
+\]
+
+- F-тест сопоставляет изменчивость, описанную регрессией, с остаточной изменчивостью.
+- В простой регрессии \(F=t^2\), где \(t\) — статистика для проверки \(H_0:\beta_1=0\).
+- P-value общего F-теста и двустороннего t-теста наклона совпадают.
+- Значимый F-тест не означает ни высокого \(R^2\), ни правильности спецификации модели.
+
+## ANOVA-таблица простой регрессии
+
+| Источник изменчивости | \(SS\) | \(df\) | \(MS\) | \(F\) |
+|---|---:|---:|---:|---:|
+| Регрессия | \(SS_r\) | \(1\) | \(MS_r=SS_r\) | \(MS_r/MS_e\) |
+| Остаточная | \(SS_e\) | \(n-2\) | \(MS_e=SS_e/(n-2)\) | — |
+| Общая | \(SS_t\) | \(n-1\) | — | — |
+
+\[
+SS_t=SS_r+SS_e,
+\qquad
+n-1=1+(n-2).
+\]
+
+Здесь F-тест проверяет наличие линейной связи, а не решает задачу выбора лучшей из нескольких моделей.
+
+## Допущения модели
+
+- При выполнении определённых условий (согласно теореме Гаусса-Маркова и некоторым другим) метод наименьших квадратов (МНК) даёт даёт наилучшие линейные несмещённые оценки параметров модели
+- Что значит "наилучшие"?
+
+## Наилучшие оценки модели при линейной регрессии
+
+- Вообще вычислимы
+- Несмещённые
+- Имеют наименьшую дисрерсию (точные)
+- На этих коэффициентах можно прогонять стат тесты
+- В данных нет какой-то структуры или "особенных" наблюдений, которые искажали бы или стягивали на себя состояние модели
 
 ## Требования к линейной модели
 
@@ -1413,3 +2139,27 @@ D_i=
 
 Большое \(D_i\) — повод проверить наблюдение, а не автоматическое основание назвать его ошибкой или удалить.
 
+## Нормальность распределения остатков
+
+Допущение относится к **ошибкам модели**, а не к безусловному распределению \(Y\):
+
+\[
+\varepsilon_i\sim N(0,\sigma^2).
+\]
+
+Поскольку ошибки ненаблюдаемы, их распределение оценивают по остаткам.
+
+```{r galton-qqplot, fig.width=7, fig.height=5}
+car::qqPlot(
+  fit_galton,
+  main = "Q-Q plot остатков модели",
+  xlab = "Теоретические квантили нормального распределения",
+  ylab = "Стьюдентизированные остатки",
+  id.n = 3
+)
+```
+
+- Если распределение остатков близко к нормальному, точки примерно следуют опорной прямой.
+- Систематические отклонения в хвостах могут указывать на асимметрию, тяжёлые хвосты или отдельные необычные наблюдения.
+- Нормальность не требуется для несмещённости МНК и выполнения теоремы Гаусса — Маркова.
+- Она важна для точных t- и F-процедур при малых выборках; с ростом объёма выборки вывод обычно становится менее чувствительным к умеренным отклонениям от нормальности.
